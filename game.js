@@ -1,10 +1,33 @@
-/* GROK VOXELS — first-person voxel shooter, no build step */
+/* GROK VOXELS 2.0 — first-person voxel shooter, no build step */
 (() => {
 "use strict";
 
 const W = 52, H = 16, D = 180;
 const MAG = 12, RESERVE_START = 36;
 const MAX_LIVES = 3;
+const MAX_HP = 100;
+// Difficulty tuning. [early, late] pairs ramp over the course as you push deeper.
+const DIFFS = [
+  { name: "EASY",   desc: "Fewer, slower-shooting bots. Big health regen. Aim assist.",
+    dmg: 0.5, count: 0.6, spread: [0.16, 0.09], bolt: [6.5, 8.5], fireCd: [2.2, 1.6], windup: 0.9, see: 13,
+    regenDelay: 2.5, regenRate: 24, drop: 0.5, hpDrop: 0.3, assist: 0.075, ammoPick: 18, score: 1 },
+  { name: "NORMAL", desc: "The classic challenge, now with health regen and checkpoints.",
+    dmg: 1.0, count: 0.85, spread: [0.10, 0.055], bolt: [8, 10.5], fireCd: [1.7, 1.2], windup: 0.62, see: 16,
+    regenDelay: 4, regenRate: 14, drop: 0.32, hpDrop: 0.14, assist: 0.05, ammoPick: 12, score: 1.5 },
+  { name: "HARD",   desc: "Sharp-shooting swarms. Slow regen. For veterans.",
+    dmg: 1.45, count: 1.15, spread: [0.055, 0.025], bolt: [10, 12.5], fireCd: [1.25, 0.9], windup: 0.42, see: 20,
+    regenDelay: 6, regenRate: 8, drop: 0.2, hpDrop: 0.06, assist: 0.03, ammoPick: 12, score: 2 },
+];
+const DMG = { bolt: 20, melee: 24, tank: 16, drone: 10, fall: 25 };
+const SHELLS_PICK = 8;
+const STORE_KEY = "grokvoxels2";
+function loadStore() {
+  try { return JSON.parse(localStorage.getItem(STORE_KEY) || "{}") || {}; } catch (e) { return {}; }
+}
+function saveStore(s) { try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch (e) { /* private mode */ } }
+const STORE = loadStore();
+if (!STORE.best) STORE.best = {};
+if (typeof STORE.diff !== "number") STORE.diff = 0; // first-timers start on Easy
 
 const PAL = [
   [0,0,0],
@@ -303,6 +326,8 @@ const G = {
   shake: 0,
   locked: false,
   shotCd: 0,
+  diff: STORE.diff, hp: MAX_HP, regenT: 0, kills: 0, dmgTaken: 0, shells: 0, weapon: 0, emergencyT: 0,
+  maxRoom: 0, cp: null, runStart: 0, dmgDir: 0, dmgDirT: 0, god: false, bot: false,
 };
 const P = {
   x: 26, y: 3, z: 6, vx: 0, vy: 0, vz: 0,
@@ -395,7 +420,7 @@ function generate(seed) {
     rw |= 0; rd |= 0;
     const x = clamp((cx - (rw >> 1)) | 0, 2, W - rw - 2);
     const z = cz | 0;
-    const r = { x, z, w: rw, d: rd, fy, type, walls: rng.pick(wallSets) };
+    const r = { x, z, w: rw, d: rd, fy, type, walls: rng.pick(wallSets), idx: rooms.length };
     rooms.push(r);
     cz = z + rd;
     cx = x + (rw >> 1);
@@ -442,6 +467,7 @@ function generate(seed) {
 
   function paintRoom(r) {
     const [wall, trim] = r.walls;
+    r.door = doorX(r, 3);
     const outdoor = r.type === "court";
     const ceilH = outdoor ? 8 : 6;
     const wallH = outdoor ? 3 : 6;
@@ -574,33 +600,53 @@ function generate(seed) {
     }
 
     if (r.type !== "start" && r.type !== "extract") {
-      const nEn = r.type === "arena" ? rng.int(3, 5) : r.type === "hall" ? rng.int(2, 3) : rng.int(1, 3);
-      let placed = 0, guard = 0;
-      while (placed < nEn && guard++ < 40) {
+      const Dd = DIFFS[G.diff];
+      // 0 at the first combat room → 1 at the last: early rooms are gentle, the end is a fight.
+      const ramp = clamp((r.idx - 1) / Math.max(1, rooms.length - 3), 0, 1);
+      const base = r.type === "arena" ? rng.int(3, 5) : r.type === "hall" ? rng.int(2, 3) : rng.int(1, 3);
+      const nEn = Math.max(1, Math.round(base * Dd.count * (0.55 + 0.6 * ramp)));
+      let placed = 0, guard = 0, tanks = 0;
+      while (placed < nEn && guard++ < 60) {
         const ex = rng.f(r.x + 2, r.x + r.w - 2);
-        const ez = rng.f(r.z + 3, r.z + r.d - 3);
+        const ez = rng.f(r.z + 4, r.z + r.d - 3);
         const ey = r.fy + 1.01;
         if (world.solid(ex, ey, ez) || world.solid(ex, ey + 1, ez)) continue;
-        const kind = rng.chance(0.45) ? "shoot" : "melee";
+        let kind = rng.chance(0.3 + 0.25 * ramp) ? "shoot" : "melee";
+        if (ramp > 0.3 && rng.chance(0.2)) kind = "drone";
+        const tankOk = G.diff === 0 ? r.idx === rooms.length - 2 : ramp > 0.55;
+        if (tankOk && tanks < (G.diff === 2 ? 2 : 1) && rng.chance(G.diff === 0 ? 0.5 : 0.25)) { kind = "tank"; tanks++; }
+        const fly = kind === "drone";
+        if (fly && (world.solid(ex, r.fy + 2.4, ez) || world.solid(ex, r.fy + 3.2, ez))) continue;
         enemies.push({
-          x: ex, y: ey, z: ez, vx: 0, vy: 0, vz: 0,
-          hp: kind === "shoot" ? 3 : 2,
-          kind, cd: rng.f(0.4, 1.2),
-          yaw: rng.f(0, Math.PI * 2),
-          hit: 0, bob: rng.f(0, 10),
-          speed: kind === "melee" ? rng.f(2.4, 3.2) : rng.f(1.4, 2.0),
+          x: ex, y: fly ? r.fy + 2.4 : ey, z: ez, vx: 0, vy: 0, vz: 0,
+          hp: { shoot: 3, melee: 2, drone: 1, tank: 7 }[kind], maxHp: { shoot: 3, melee: 2, drone: 1, tank: 7 }[kind],
+          kind, fly, cd: rng.f(0.8, 1.8), yaw: rng.f(0, Math.PI * 2),
+          hit: 0, bob: rng.f(0, 10), windup: 0, windMax: 1, alert: false, alertT: 0, see: false, losT: rng.f(0, 0.2),
+          strafe: rng.chance(0.5) ? 1 : -1, room: r.idx,
+          speed: kind === "melee" ? rng.f(2.2, 3.0) : kind === "tank" ? 1.1 : kind === "drone" ? 2.6 : rng.f(1.4, 2.0),
         });
         placed++;
       }
-      if (rng.chance(0.8)) {
-        pickups.push({
-          x: rng.f(r.x + 2, r.x + r.w - 2),
-          y: r.fy + 1.4,
-          z: rng.f(r.z + 2, r.z + r.d - 2),
-          kind: rng.chance(0.55) ? "ammo" : "gem",
-          alive: true, t: rng.f(0, 5),
-        });
+      // pickups: generous on Easy, a bit scarcer on Hard
+      const spot = () => {
+        for (let k = 0; k < 20; k++) {
+          const px = rng.f(r.x + 2, r.x + r.w - 2), pz = rng.f(r.z + 2, r.z + r.d - 2);
+          if (!world.solid(px, r.fy + 1.2, pz)) return { x: px, z: pz };
+        }
+        return { x: r.x + r.w / 2, z: r.z + r.d / 2 };
+      };
+      const addPick = kind => { const s = spot(); pickups.push({ x: s.x, y: r.fy + 1.4, z: s.z, kind, alive: true, t: rng.f(0, 5) }); };
+      if (G.diff === 0) { addPick("ammo"); if (rng.chance(0.65)) addPick("health"); if (rng.chance(0.3)) addPick("gem"); }
+      else if (rng.chance(G.diff === 1 ? 0.9 : 0.75)) {
+        const roll = rng.next();
+        addPick(roll < 0.45 ? "ammo" : roll < (G.diff === 1 ? 0.8 : 0.72) ? "health" : "gem");
+        if (r.type === "arena" && rng.chance(0.5)) addPick(rng.chance(0.5) ? "ammo" : "health");
       }
+      if (r.idx === 2) addPick("scatter");                                  // new weapon, early on
+      if (r.idx === Math.floor(rooms.length / 2) && G.diff < 2) addPick("heart"); // extra life halfway
+      // checkpoint just inside the entrance door
+      const dx = doorX(r, 3);
+      r.cp = { x: dx + 1.5, y: r.fy + 1.01, z: r.z + 1.6, yaw: Math.PI, idx: r.idx, active: false };
     }
   }
 
@@ -779,57 +825,125 @@ function burst(x, y, z, col, n, spd) {
   }
 }
 
-function hurtPlayer() {
-  if (G.mode !== "play" || G.invuln > 0) return;
-  G.lives--;
-  G.invuln = 1.15;
-  G.hurtFlash = 0.45;
-  G.shake = 0.35;
+function toast(text, color) {
+  const el = document.getElementById("toast");
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = color || "#fff56a";
+  el.classList.remove("show"); void el.offsetWidth; el.classList.add("show");
+}
+
+function hurtPlayer(amount, src) {
+  if (G.mode !== "play" || G.invuln > 0 || G.god) return;
+  const Dd = DIFFS[G.diff];
+  const dmg = Math.max(1, Math.round((amount || DMG.bolt) * Dd.dmg));
+  G.hp -= dmg;
+  G.regenT = Dd.regenDelay;
+  G.invuln = 0.3;                 // brief i-frames so a burst can't delete you
+  G.hurtFlash = 0.25 + Math.min(0.3, dmg / 80);
+  G.shake = Math.max(G.shake, 0.22);
+  G.dmgTaken += dmg;
+  if (src) { // damage direction indicator
+    G.dmgDir = Math.atan2(src.x - P.x, -(src.z - P.z)); G.dmgDirT = 0.9; // world angle
+  }
   sfx("hurt");
+  if (G.hp <= 0) loseLife();
   updateHUD();
-  if (G.lives <= 0) die();
+}
+
+function respawnAtCheckpoint() {
+  const c = G.cp || spawn;
+  P.x = c.x; P.y = c.y; P.z = c.z;
+  P.vx = P.vy = P.vz = 0;
+  P.yaw = c.yaw; P.pitch = 0; P.grounded = false;
+  bolts = [];
+  // give the player breathing room: nearby bots lose track and back off a little
+  for (const e of enemies) {
+    e.windup = 0; e.cd = Math.max(e.cd, 1.5); e.alert = false; e.see = false;
+    if (Math.hypot(e.x - P.x, e.z - P.z) < 6) { e.vx = e.vz = 0; }
+  }
+}
+
+function loseLife() {
+  G.lives--;
+  if (G.lives <= 0) { G.hp = 0; updateHUD(); die(); return; }
+  G.hp = MAX_HP;
+  G.invuln = 2.2;
+  G.regenT = 0;
+  if (G.ammo + G.reserve < MAG) G.reserve = MAG - G.ammo; // never respawn empty
+  respawnAtCheckpoint();
+  toast(G.cp && G.cp !== spawn ? "LIFE LOST · BACK TO CHECKPOINT" : "LIFE LOST · BACK TO START", "#ff6b8a");
+}
+
+function saveBest() {
+  const k = DIFFS[G.diff].name;
+  const prev = STORE.best[k] || 0;
+  const isBest = G.score > prev;
+  if (isBest) { STORE.best[k] = G.score; saveStore(STORE); }
+  return { isBest, best: Math.max(prev, G.score) };
+}
+function runSummary(b) {
+  const secs = Math.round(G.time - G.runStart);
+  return "SCORE " + G.score + (b.isBest ? "  ★ NEW BEST" : "  ·  BEST " + b.best) +
+    "\nKILLS " + G.kills + "  ·  ROOMS " + Math.max(0, G.maxRoom) + "/" + Math.max(1, rooms.length - 2) +
+    "  ·  " + Math.floor(secs / 60) + ":" + String(secs % 60).padStart(2, "0") + "  ·  " + DIFFS[G.diff].name;
 }
 
 function die() {
   G.mode = "dead";
   sfx("die");
   document.exitPointerLock && document.exitPointerLock();
+  const b = saveBest();
   showOverlay("dead");
-  document.getElementById("dead-stats").textContent =
-    "SCORE " + G.score + "   ·   COURSE #" + (G.seed >>> 0).toString(16).toUpperCase();
+  document.getElementById("dead-msg").textContent = G.diff > 0 && G.maxRoom <= 2
+    ? "The bots got you. Try EASY to learn the ropes!" : "The bots got you. Your checkpoints reset each run.";
+  document.getElementById("dead-stats").textContent = runSummary(b);
 }
 
 function win() {
   if (G.mode !== "play") return;
   G.mode = "win";
   sfx("win");
-  G.score += 250 + G.lives * 100;
+  G.score += Math.round((250 + G.lives * 100) * DIFFS[G.diff].score);
   document.exitPointerLock && document.exitPointerLock();
+  const b = saveBest();
   showOverlay("win");
-  document.getElementById("win-stats").textContent =
-    "SCORE " + G.score + "   ·   LIVES LEFT " + G.lives + "   ·   #" + (G.seed >>> 0).toString(16).toUpperCase();
+  document.getElementById("win-stats").textContent = runSummary(b) + "  ·  LIVES LEFT " + G.lives;
   updateHUD();
 }
 
-function startRun() {
+function startRun(diff) {
+  if (typeof diff === "number") { G.diff = clamp(diff | 0, 0, 2); STORE.diff = G.diff; saveStore(STORE); }
   const seed = (Math.random() * 0xffffffff) ^ (Date.now() * 2654435761);
   generate(seed);
   G.mode = "play";
   G.lives = MAX_LIVES;
+  G.hp = MAX_HP;
+  G.regenT = 0;
   G.score = 0;
+  G.kills = 0;
+  G.dmgTaken = 0;
   G.ammo = MAG;
-  G.reserve = RESERVE_START;
+  G.reserve = RESERVE_START + (G.diff === 0 ? 24 : 0);
+  G.shells = 0;
+  G.weapon = 0;
   G.reload = 0;
   G.invuln = 1.0;
+  G.emergencyT = 0;
   G.muzzle = G.recoil = G.hurtFlash = G.hitmark = G.shake = 0;
   G.shotCd = 0;
+  G.dmgDirT = 0;
+  G.maxRoom = 0;
+  G.cp = spawn;
+  G.runStart = G.time;
   resetPlayer();
   hideOverlay();
   updateHUD();
   try { audio(); } catch (e) {}
-  if (!isTouchPlay()) {
+  if (!isTouchPlay() && !G.bot) {
     try { canvas.requestPointerLock && canvas.requestPointerLock(); } catch (err) {}
   }
+  toast(DIFFS[G.diff].name + " · REACH THE GOLD PAD", "#1ce0ff");
 }
 
 function showOverlay(which) {
@@ -853,66 +967,151 @@ function hideOverlay() {
 }
 
 function updateHUD() {
-  const el = document.getElementById("lives");
   let html = "";
   for (let i = 0; i < MAX_LIVES; i++) html += i < G.lives ? "<span>♥</span>" : "<span class='gone'>♥</span>";
-  el.innerHTML = html;
+  document.getElementById("hearts").innerHTML = html;
+  updateHpBar();
   document.getElementById("score").textContent = G.score;
   const ammo = document.getElementById("ammo");
-  if (G.reload > 0) {
+  document.getElementById("ammo-label").textContent = G.weapon === 1 ? "SCATTER" : "BLASTER";
+  if (G.weapon === 1) {
+    ammo.textContent = G.shells + " SHELLS";
+    ammo.className = G.shells <= 2 ? "low" : "";
+  } else if (G.reload > 0) {
     ammo.textContent = "RELOAD";
     ammo.className = "reloading";
   } else {
     ammo.textContent = G.ammo + " / " + G.reserve;
     ammo.className = G.ammo <= 3 ? "low" : "";
   }
+  const swap = document.getElementById("btn-swap");
+  if (swap) swap.classList.toggle("hidden", G.shells <= 0);
   document.getElementById("seed-chip").textContent =
-    "COURSE #" + (G.seed >>> 0).toString(16).toUpperCase() + "  " + G.sky.name;
+    DIFFS[G.diff].name + " · ROOM " + Math.max(0, G.maxRoom) + "/" + Math.max(1, rooms.length - 2) + " · " + G.sky.name;
+}
+let hpShown = -1;
+function updateHpBar() {
+  const v = Math.max(0, Math.round(G.hp));
+  if (v === hpShown) return;
+  hpShown = v;
+  const fill = document.getElementById("hp-fill");
+  fill.style.width = v + "%";
+  fill.className = v < 30 ? "crit" : v < 60 ? "mid" : "";
 }
 
 function tryReload() {
+  if (G.weapon === 1) return;
   if (G.reload > 0 || G.ammo >= MAG || G.reserve <= 0) return;
-  G.reload = 1.25;
+  G.reload = G.diff === 0 ? 1.0 : 1.25;
   sfx("reload");
   updateHUD();
 }
 
-function shoot() {
-  if (G.mode !== "play" || G.reload > 0) return;
-  if (G.ammo <= 0) { tryReload(); return; }
-  G.ammo--;
-  G.muzzle = 0.07;
-  G.recoil = 0.12;
-  G.shake = Math.max(G.shake, 0.08);
-  sfx("shoot");
-  const o = eyePos();
-  const d = forward();
-  o.x += d.x * 0.2; o.y += d.y * 0.2; o.z += d.z * 0.2;
+function switchWeapon(to) {
+  if (G.mode !== "play") return;
+  const next = typeof to === "number" ? to : 1 - G.weapon;
+  if (next === 1 && G.shells <= 0) { toast("NO SCATTER SHELLS", "#ff9a6b"); return; }
+  if (next === G.weapon) return;
+  G.weapon = next; G.reload = 0; G.shotCd = 0.2;
+  sfx("reload");
+  updateHUD();
+}
+
+// Aim assist: nudge the shot toward a bot that's very close to the crosshair (bigger on phones / Easy).
+function assistDir(o, d) {
+  let cone = DIFFS[G.diff].assist + (isTouchPlay() ? 0.035 : 0);
+  let best = null, bestA = cone;
+  for (const e of enemies) {
+    if (e.hp <= 0) continue;
+    const cy = e.y + (e.kind === "tank" ? 0.8 : 0.6);
+    const vx = e.x - o.x, vy = cy - o.y, vz = e.z - o.z, L = Math.hypot(vx, vy, vz);
+    if (L > 30 || L < 0.5) continue;
+    const a = Math.acos(clamp((vx * d.x + vy * d.y + vz * d.z) / L, -1, 1));
+    if (a < bestA && los(o.x, o.y, o.z, e.x, cy, e.z)) { bestA = a; best = { x: vx / L, y: vy / L, z: vz / L }; }
+  }
+  return best || d;
+}
+
+function enemyBox(e) {
+  if (e.kind === "tank") return [e.x - 0.55, e.y, e.z - 0.55, e.x + 0.55, e.y + 1.7, e.z + 0.55];
+  if (e.kind === "drone") return [e.x - 0.38, e.y - 0.1, e.z - 0.38, e.x + 0.38, e.y + 0.6, e.z + 0.38];
+  return [e.x - 0.38, e.y, e.z - 0.38, e.x + 0.38, e.y + 1.35, e.z + 0.38];
+}
+
+function fireRay(o, d, dmg) {
   const maxd = 48;
   const vhit = traceVoxels(o, d, maxd);
   let bestT = vhit ? vhit.t : maxd;
   let bestE = null;
   for (const e of enemies) {
     if (e.hp <= 0) continue;
-    const t = rayAABB(o, d, e.x - 0.38, e.y, e.z - 0.38, e.x + 0.38, e.y + 1.35, e.z + 0.38, bestT);
+    const b = enemyBox(e);
+    const t = rayAABB(o, d, b[0], b[1], b[2], b[3], b[4], b[5], bestT);
     if (t !== null && t < bestT) { bestT = t; bestE = e; }
   }
   const hx = o.x + d.x * bestT, hy = o.y + d.y * bestT, hz = o.z + d.z * bestT;
   if (bestE) {
-    bestE.hp--;
-    bestE.hit = 0.15;
-    G.hitmark = 0.12;
-    G.score += 25;
-    burst(hx, hy, hz, [1, 0.3, 0.2], 8, 4);
-    sfx("hit");
-    if (bestE.hp <= 0) {
-      G.score += 100;
-      burst(bestE.x, bestE.y + 0.6, bestE.z, [1, 0.2, 0.45], 16, 6);
-      sfx("kill");
-    }
+    damageEnemy(bestE, dmg, hx, hy, hz);
   } else if (vhit) {
-    burst(hx, hy, hz, [1, 0.85, 0.4], 6, 3);
+    burst(hx, hy, hz, [1, 0.85, 0.4], 4, 3);
   }
+  return bestE;
+}
+
+function damageEnemy(e, dmg, hx, hy, hz) {
+  e.hp -= dmg;
+  e.hit = 0.15;
+  e.alert = true;
+  G.hitmark = 0.12;
+  G.score += Math.round(25 * DIFFS[G.diff].score);
+  burst(hx, hy, hz, [1, 0.3, 0.2], 6, 4);
+  sfx("hit");
+  if (e.hp <= 0) {
+    G.kills++;
+    const val = e.kind === "tank" ? 300 : e.kind === "drone" ? 120 : 100;
+    G.score += Math.round(val * DIFFS[G.diff].score);
+    burst(e.x, e.y + 0.6, e.z, e.kind === "tank" ? [1, 0.6, 0.1] : [1, 0.2, 0.45], e.kind === "tank" ? 30 : 16, 6);
+    sfx("kill");
+    // drops
+    const Dd = DIFFS[G.diff], dropY = (e.fly ? e.y - 1.2 : e.y) + 0.4;
+    if (Math.random() < Dd.drop || e.kind === "tank") pickups.push({ x: e.x, y: dropY, z: e.z, kind: "ammo", alive: true, t: 0, small: e.kind !== "tank" });
+    if (Math.random() < Dd.hpDrop || (e.kind === "tank" && G.diff < 2)) pickups.push({ x: e.x + 0.4, y: dropY, z: e.z + 0.3, kind: "health", alive: true, t: 1, small: true });
+  }
+}
+
+function shoot() {
+  if (G.mode !== "play") return;
+  const o = eyePos();
+  const d0 = forward();
+  o.x += d0.x * 0.2; o.y += d0.y * 0.2; o.z += d0.z * 0.2;
+  if (G.weapon === 1) {
+    if (G.shells <= 0) { switchWeapon(0); return; }
+    G.shells--;
+    G.muzzle = 0.1; G.recoil = 0.28; G.shake = Math.max(G.shake, 0.18);
+    G.shotCd = 0.62;
+    sfx("shoot"); blip(70, 0.18, "sawtooth", 0.07, 35);
+    const d = assistDir(o, d0);
+    // 7 pellets in a cone; up close this deletes anything
+    for (let i = 0; i < 7; i++) {
+      const a = Math.random() * Math.PI * 2, r = (i === 0 ? 0 : 0.035 + Math.random() * 0.05);
+      const ux = -d.z, uz = d.x; // horizontal perpendicular
+      const pd = { x: d.x + ux * Math.cos(a) * r, y: d.y + Math.sin(a) * r, z: d.z + uz * Math.cos(a) * r };
+      const L = Math.hypot(pd.x, pd.y, pd.z);
+      fireRay(o, { x: pd.x / L, y: pd.y / L, z: pd.z / L }, 1);
+    }
+    if (G.shells <= 0) { toast("SCATTER EMPTY · BACK TO BLASTER", "#ff9a6b"); G.weapon = 0; }
+    updateHUD();
+    return;
+  }
+  if (G.reload > 0) return;
+  if (G.ammo <= 0) { tryReload(); return; }
+  G.ammo--;
+  G.muzzle = 0.07;
+  G.recoil = 0.12;
+  G.shotCd = 0.16;
+  G.shake = Math.max(G.shake, 0.08);
+  sfx("shoot");
+  fireRay(o, assistDir(o, d0), 1);
   if (G.ammo <= 0) tryReload();
   updateHUD();
 }
@@ -924,43 +1123,97 @@ function los(ax, ay, az, bx, by, bz) {
   return !hit;
 }
 
+// How far into the run we are (0..1). Difficulty ramps with it.
+function runRamp() { return clamp(G.maxRoom / Math.max(1, rooms.length - 2), 0, 1); }
+
+function fireBolt(e, yawOff, dmg) {
+  const Dd = DIFFS[G.diff], t = runRamp();
+  const sy = e.y + (e.kind === "tank" ? 1.1 : e.fly ? 0.25 : 0.9);
+  const ddx = P.x - e.x, ddy = (P.y + 1.1) - sy, ddz = P.z - e.z;
+  const L = Math.hypot(ddx, ddy, ddz) || 1;
+  // aim error: wide early / on Easy, tighter later
+  const spread = Dd.spread[0] + (Dd.spread[1] - Dd.spread[0]) * t;
+  const yaw = Math.atan2(ddx, ddz) + (yawOff || 0) + (Math.random() - 0.5) * 2 * spread;
+  const pitch = Math.asin(clamp(ddy / L, -1, 1)) + (Math.random() - 0.5) * 1.2 * spread;
+  const spd = (Dd.bolt[0] + (Dd.bolt[1] - Dd.bolt[0]) * t) * (e.kind === "drone" ? 1.15 : 1);
+  bolts.push({
+    x: e.x, y: sy, z: e.z,
+    vx: Math.sin(yaw) * Math.cos(pitch) * spd, vy: Math.sin(pitch) * spd, vz: Math.cos(yaw) * Math.cos(pitch) * spd,
+    life: 3, friendly: false, dmg: dmg || DMG.bolt, src: e,
+  });
+  blip(e.kind === "tank" ? 90 : 160, 0.07, "square", 0.04, 70);
+}
+
 function updateEnemies(dt) {
+  const Dd = DIFFS[G.diff], t = runRamp();
+  const fireCd = Dd.fireCd[0] + (Dd.fireCd[1] - Dd.fireCd[0]) * t;
   for (const e of enemies) {
     if (e.hp <= 0) continue;
     e.bob += dt * 6;
     e.hit = Math.max(0, e.hit - dt);
+    e.alertT = Math.max(0, e.alertT - dt);
     e.cd -= dt;
     const dx = P.x - e.x, dz = P.z - e.z;
-    const dist = Math.hypot(dx, dz);
-    const see = dist < 18 && los(e.x, e.y + 0.9, e.z, P.x, P.y + 1.1, P.z);
-    if (dist < 1.15) {
-      e.vx = e.vz = 0;
-      if (e.cd <= 0) { e.cd = 0.7; hurtPlayer(); }
-    } else if (see) {
-      e.yaw = Math.atan2(dx, -dz);
-      if (e.kind === "shoot" && dist < 14 && dist > 4.5) {
-        e.vx *= 0.4; e.vz *= 0.4;
-        if (e.cd <= 0) {
-          e.cd = 1.15;
-          const ddx = P.x - e.x, ddy = (P.y + 1.1) - (e.y + 0.9), ddz = P.z - e.z;
-          const L = Math.hypot(ddx, ddy, ddz) || 1;
-          bolts.push({
-            x: e.x, y: e.y + 0.9, z: e.z,
-            vx: ddx / L * 10, vy: ddy / L * 10, vz: ddz / L * 10,
-            life: 2.2, friendly: false,
-          });
-          blip(140, 0.06, "square", 0.04, 70);
-        }
-      } else {
-        const sp = e.speed;
-        e.vx = (dx / dist) * sp;
-        e.vz = (dz / dist) * sp;
-      }
-    } else {
-      e.vx *= 0.85; e.vz *= 0.85;
-      if (Math.random() < 0.01) e.yaw += (Math.random() - 0.5);
+    const dist = Math.hypot(dx, dz) || 0.001;
+    const range = Dd.see * (e.alert ? 1.4 : 1);
+    e.losT -= dt;
+    if (e.losT <= 0) {
+      e.losT = 0.12 + Math.random() * 0.08;
+      const eyeY = e.y + (e.kind === "tank" ? 1.3 : e.fly ? 0.3 : 0.9);
+      e.see = dist < range && los(e.x, eyeY, e.z, P.x, P.y + 1.1, P.z);
+      if (e.see && !e.alert) { e.alert = true; e.alertT = 0.8; e.cd = Math.max(e.cd, 0.6); } // "!" telegraph before first shot
     }
-    moveCollide(e, dt, 0.32, 1.3, 22);
+    const see = e.see;
+    if (see || e.windup > 0) e.yaw = Math.atan2(dx, -dz);
+
+    // wind-up in progress: stand still, glow, then strike/fire
+    if (e.windup > 0) {
+      e.windup -= dt;
+      e.vx *= 0.7; e.vz *= 0.7;
+      if (e.windup <= 0) {
+        if (e.wkind === "melee") {
+          if (dist < 1.75 && Math.abs((P.y) - e.y) < 1.6) hurtPlayer(DMG.melee, e);
+          e.cd = 1.0;
+        } else if (e.kind === "tank") {
+          for (const off of [-0.2, 0, 0.2]) fireBolt(e, off, DMG.tank);
+          e.cd = fireCd * 1.9;
+        } else {
+          if (see) fireBolt(e, 0, e.kind === "drone" ? DMG.drone : DMG.bolt);
+          e.cd = fireCd * (e.kind === "drone" ? 0.8 : 1) * (0.85 + Math.random() * 0.3);
+        }
+      }
+    } else if (e.kind === "melee" || (e.kind === "tank" && dist < 1.6)) {
+      if (dist < 1.4 && e.cd <= 0) {
+        e.windup = e.windMax = Dd.windup * 0.6 + 0.15; e.wkind = "melee";
+        blip(380, 0.05, "square", 0.03, 520);
+      } else if (see && dist > 1.0) {
+        e.vx = (dx / dist) * e.speed; e.vz = (dz / dist) * e.speed;
+      } else if (!see) { e.vx *= 0.85; e.vz *= 0.85; }
+      else { e.vx = e.vz = 0; }
+    } else { // ranged: shoot / drone / tank
+      const far = e.kind === "tank" ? 15 : 14, near = e.kind === "drone" ? 3.5 : 4.5;
+      if (see && dist < far) {
+        if (e.cd <= 0 && e.alertT <= 0) {
+          e.windup = e.windMax = Dd.windup * (e.kind === "tank" ? 1.3 : e.kind === "drone" ? 0.8 : 1); e.wkind = "shot";
+          blip(e.kind === "tank" ? 120 : 600, 0.06, "triangle", 0.035, e.kind === "tank" ? 200 : 900);
+        }
+        // strafe sideways (drones circle), close in if too far, back off if too close
+        const px = -dz / dist, pz = dx / dist;
+        const st = e.kind === "tank" ? 0 : (e.kind === "drone" ? 1.8 : 0.9) * e.strafe;
+        const toward = dist > (e.kind === "drone" ? 8 : 10) ? e.speed * 0.6 : dist < near ? -e.speed * 0.5 : 0;
+        e.vx = px * st + (dx / dist) * toward; e.vz = pz * st + (dz / dist) * toward;
+        if (Math.random() < dt * 0.4) e.strafe = -e.strafe;
+      } else if (see) {
+        e.vx = (dx / dist) * e.speed; e.vz = (dz / dist) * e.speed;
+      } else {
+        e.vx *= 0.85; e.vz *= 0.85;
+        if (Math.random() < 0.01) e.yaw += (Math.random() - 0.5);
+      }
+    }
+    const pvx = e.vx, pvz = e.vz;
+    if (e.fly) moveCollide(e, dt, 0.32, 0.6, 0);
+    else moveCollide(e, dt, e.kind === "tank" ? 0.5 : 0.32, e.kind === "tank" ? 1.7 : 1.3, 22);
+    if ((pvx && !e.vx) || (pvz && !e.vz)) e.strafe = -e.strafe; // bumped a wall: change direction
     if (e.y < -2) e.hp = 0;
   }
   enemies = enemies.filter(e => e.hp > 0 || e.hit > 0);
@@ -974,7 +1227,7 @@ function updateBolts(dt) {
     if (!b.friendly) {
       if (Math.abs(b.x - P.x) < 0.4 && b.y > P.y && b.y < P.y + 1.7 && Math.abs(b.z - P.z) < 0.4) {
         b.life = 0;
-        hurtPlayer();
+        hurtPlayer(b.dmg || DMG.bolt, b.src || b);
         burst(b.x, b.y, b.z, [1,0.2,0.2], 8, 3);
       }
     }
@@ -983,19 +1236,51 @@ function updateBolts(dt) {
 }
 
 function updatePickups(dt) {
+  const Dd = DIFFS[G.diff];
   for (const p of pickups) {
     if (!p.alive) continue;
     p.t += dt;
-    if (Math.hypot(p.x - P.x, p.z - P.z) < 1.1 && Math.abs(p.y - (P.y + 0.8)) < 1.2) {
+    if (Math.hypot(p.x - P.x, p.z - P.z) < 1.25 && Math.abs(p.y - (P.y + 0.8)) < 1.3) {
+      if (p.kind === "health" && G.hp >= MAX_HP) continue; // leave it for later
       p.alive = false;
       sfx("pickup");
+      let col = [1, 0.85, 0.2];
       if (p.kind === "ammo") {
-        G.reserve += 12;
-        G.score += 25;
+        const n = p.small ? Math.ceil(Dd.ammoPick / 2) : Dd.ammoPick;
+        G.reserve += n; G.score += 25; toast("+" + n + " AMMO", "#ffd23f");
+      } else if (p.kind === "health") {
+        const n = p.small ? 25 : 45;
+        G.hp = Math.min(MAX_HP, G.hp + n); col = [0.3, 1, 0.4]; toast("+" + n + " HEALTH", "#7dff5a");
+      } else if (p.kind === "heart") {
+        if (G.lives < MAX_LIVES) { G.lives++; toast("+1 LIFE", "#ff3d6e"); } else { G.score += 200; toast("+200 (LIVES FULL)", "#ff3d6e"); }
+        G.hp = MAX_HP; col = [1, 0.2, 0.4];
+      } else if (p.kind === "scatter") {
+        G.shells += SHELLS_PICK; col = [1, 0.5, 0.1];
+        const first = G.weapon !== 1;
+        G.weapon = 1; G.reload = 0;
+        toast(first ? "SCATTER GUN! · " + (isTouchPlay() ? "SWAP" : "Q") + " to switch" : "+" + SHELLS_PICK + " SHELLS", "#ff9a3b");
       } else {
-        G.score += 75;
+        G.score += 75; col = [0.9, 0.2, 0.9]; toast("+75 GEM", "#f07bff");
       }
-      burst(p.x, p.y, p.z, p.kind === "ammo" ? [1,0.85,0.2] : [0.9,0.2,0.9], 10, 3);
+      burst(p.x, p.y, p.z, col, 10, 3);
+      updateHUD();
+    }
+  }
+}
+
+// Checkpoints: walking into a new combat room saves your respawn point there.
+function updateCheckpoints() {
+  for (const r of rooms) {
+    if (!r.cp || r.cp.active) continue;
+    if (P.x > r.x && P.x < r.x + r.w && P.z > r.z + 0.8 && P.z < r.z + r.d) {
+      r.cp.active = true;
+      G.cp = r.cp;
+      G.maxRoom = Math.max(G.maxRoom, r.idx);
+      // a small top-up for reaching new ground
+      G.hp = Math.min(MAX_HP, G.hp + 20);
+      if (G.ammo + G.reserve < MAG * 2) G.reserve += 6;
+      sfx("pickup");
+      toast("CHECKPOINT · ROOM " + r.idx + "/" + Math.max(1, rooms.length - 2), "#7dff5a");
       updateHUD();
     }
   }
@@ -1030,8 +1315,10 @@ function updatePlayer(dt) {
   }
   moveCollide(P, dt, 0.32, 1.7, 24);
   if (P.y < -4) {
-    P.x = spawn.x; P.y = spawn.y; P.z = spawn.z; P.vx = P.vy = P.vz = 0;
-    hurtPlayer();
+    respawnAtCheckpoint();
+    G.invuln = 0;
+    hurtPlayer(DMG.fall / DIFFS[G.diff].dmg);
+    G.invuln = 1.0;
   }
   const pad = extract;
   if (P.x > pad.x && P.x < pad.x + pad.w && P.z > pad.z && P.z < pad.z + pad.d && P.y < pad.y + 2) {
@@ -1070,15 +1357,86 @@ function drawCube(x, y, z, sx, sy, sz, rgb, emit, viewproj) {
 
 function drawEnemy(e, vp) {
   const flash = e.hit > 0 ? 1 : 0;
-  const bob = Math.sin(e.bob) * 0.05;
-  const col = e.kind === "shoot" ? [0.55, 0.25, 1.0] : [0.95, 0.18, 0.28];
-  const body = flash ? [1,1,1] : col;
-  drawCube(e.x - 0.28, e.y + bob, e.z - 0.28, 0.56, 0.72, 0.56, body, flash, vp);
-  drawCube(e.x - 0.22, e.y + 0.72 + bob, e.z - 0.22, 0.44, 0.38, 0.44, [0.12,0.12,0.18], 0, vp);
-  const ex = Math.sin(e.yaw) * 0.18, ez = -Math.cos(e.yaw) * 0.18;
-  drawCube(e.x + ex - 0.06, e.y + 0.88 + bob, e.z + ez - 0.06, 0.12, 0.12, 0.12, [0.2,1,1], 0.9, vp);
-  drawCube(e.x - 0.22, e.y + bob, e.z - 0.08, 0.16, 0.28, 0.16, [0.1,0.1,0.14], 0, vp);
-  drawCube(e.x + 0.06, e.y + bob, e.z - 0.08, 0.16, 0.28, 0.16, [0.1,0.1,0.14], 0, vp);
+  const bob = Math.sin(e.bob) * (e.fly ? 0.15 : 0.05);
+  const winding = e.windup > 0;
+  const wk = winding ? 1 - e.windup / (e.windMax || 1) : 0;         // 0 → 1 as the attack charges
+  const pulse = winding ? 0.5 + 0.5 * Math.sin(G.time * 30) : 0;
+  const base = e.kind === "shoot" ? [0.55, 0.25, 1.0] : e.kind === "tank" ? [1.0, 0.55, 0.1] : e.kind === "drone" ? [0.1, 0.85, 0.75] : [0.95, 0.18, 0.28];
+  const body = flash ? [1, 1, 1] : winding ? [base[0] + (1 - base[0]) * pulse * 0.6, base[1] * (1 - pulse * 0.4), base[2] * (1 - pulse * 0.4)] : base;
+  const emit = flash ? 1 : winding ? 0.25 + 0.5 * wk : 0.08;
+  const fx = Math.sin(e.yaw), fz = -Math.cos(e.yaw);
+  const eyeCol = winding ? [1, 0.15, 0.1] : [0.2, 1, 1];
+  if (e.kind === "tank") {
+    drawCube(e.x - 0.5, e.y + bob, e.z - 0.5, 1.0, 1.0, 1.0, body, emit, vp);
+    drawCube(e.x - 0.36, e.y + 1.0 + bob, e.z - 0.36, 0.72, 0.6, 0.72, [0.15, 0.13, 0.12], 0, vp);
+    drawCube(e.x + fx * 0.36 - 0.2, e.y + 1.18 + bob, e.z + fz * 0.36 - 0.2, 0.4, 0.16, 0.4, eyeCol, 1, vp);
+    drawCube(e.x - 0.45, e.y - 0.0, e.z - 0.2, 0.25, 0.3, 0.4, [0.1, 0.1, 0.12], 0, vp);
+    drawCube(e.x + 0.2, e.y - 0.0, e.z - 0.2, 0.25, 0.3, 0.4, [0.1, 0.1, 0.12], 0, vp);
+  } else if (e.kind === "drone") {
+    drawCube(e.x - 0.3, e.y + bob, e.z - 0.3, 0.6, 0.4, 0.6, body, emit, vp);
+    const spin = G.time * 25;
+    for (let i = 0; i < 4; i++) {
+      const a = spin + i * Math.PI / 2;
+      drawCube(e.x + Math.cos(a) * 0.42 - 0.07, e.y + 0.42 + bob, e.z + Math.sin(a) * 0.42 - 0.07, 0.14, 0.04, 0.14, [0.9, 0.9, 0.95], 0.2, vp);
+    }
+    drawCube(e.x + fx * 0.3 - 0.08, e.y + 0.14 + bob, e.z + fz * 0.3 - 0.08, 0.16, 0.14, 0.16, eyeCol, 0.9, vp);
+  } else {
+    drawCube(e.x - 0.28, e.y + bob, e.z - 0.28, 0.56, 0.72, 0.56, body, emit, vp);
+    drawCube(e.x - 0.22, e.y + 0.72 + bob, e.z - 0.22, 0.44, 0.38, 0.44, [0.12, 0.12, 0.18], 0, vp);
+    drawCube(e.x + fx * 0.18 - 0.06, e.y + 0.88 + bob, e.z + fz * 0.18 - 0.06, 0.12, 0.12, 0.12, eyeCol, 0.9, vp);
+    drawCube(e.x - 0.22, e.y + bob, e.z - 0.08, 0.16, 0.28, 0.16, [0.1, 0.1, 0.14], 0, vp);
+    drawCube(e.x + 0.06, e.y + bob, e.z - 0.08, 0.16, 0.28, 0.16, [0.1, 0.1, 0.14], 0, vp);
+  }
+  // telegraph: a charging orb grows where the shot will come from
+  if (winding && e.wkind === "shot") {
+    const oy = e.y + (e.kind === "tank" ? 1.1 : e.fly ? 0.2 : 0.55) + bob, k = 0.08 + 0.26 * wk;
+    const ox = e.x + fx * (e.kind === "tank" ? 0.7 : 0.45), oz = e.z + fz * (e.kind === "tank" ? 0.7 : 0.45);
+    drawCube(ox - k / 2, oy - k / 2, oz - k / 2, k, k, k, [1, 0.35 + 0.4 * pulse, 0.1], 1, vp);
+  } else if (winding) { // melee: claws flare
+    drawCube(e.x + fx * 0.38 - 0.2, e.y + 0.45, e.z + fz * 0.38 - 0.2, 0.4, 0.12, 0.4, [1, 0.2 + pulse * 0.6, 0.1], 1, vp);
+  }
+  // "!" when a bot first spots you
+  if (e.alertT > 0) {
+    const hy = e.y + (e.kind === "tank" ? 2.0 : e.fly ? 0.9 : 1.45) + 0.1 * Math.sin(G.time * 12);
+    drawCube(e.x - 0.06, hy + 0.18, e.z - 0.06, 0.12, 0.32, 0.12, [1, 0.9, 0.2], 1, vp);
+    drawCube(e.x - 0.06, hy, e.z - 0.06, 0.12, 0.12, 0.12, [1, 0.9, 0.2], 1, vp);
+  }
+  // health pips over damaged multi-hit bots
+  if (e.maxHp > 2 && e.hp < e.maxHp) {
+    const hy = e.y + (e.kind === "tank" ? 1.85 : 1.25) + bob, w = 0.7, f = e.hp / e.maxHp;
+    drawCube(e.x - w / 2, hy, e.z - 0.03, w, 0.06, 0.06, [0.15, 0.15, 0.15], 0, vp);
+    drawCube(e.x - w / 2, hy + 0.01, e.z - 0.04, w * f, 0.06, 0.08, [1, 0.25, 0.3], 0.8, vp);
+  }
+}
+
+function drawPickup(p, vp) {
+  const y = p.y + Math.sin(p.t * 3) * 0.12, s = p.small ? 0.28 : 0.36, h = s / 2;
+  if (p.kind === "health") {
+    drawCube(p.x - h, y, p.z - h, s, s, s, [0.95, 0.98, 0.95], 0.4, vp);
+    drawCube(p.x - h * 0.3, y - 0.02, p.z - h - 0.02, s * 0.3, s + 0.04, s + 0.04, [0.2, 1, 0.3], 0.8, vp);
+    drawCube(p.x - h - 0.02, y + h * 0.7, p.z - h - 0.02, s + 0.04, s * 0.3, s + 0.04, [0.2, 1, 0.3], 0.8, vp);
+  } else if (p.kind === "heart") {
+    const k = 0.4 + 0.06 * Math.sin(p.t * 6);
+    drawCube(p.x - k / 2, y, p.z - k / 2, k, k, k, [1, 0.15, 0.35], 0.9, vp);
+  } else if (p.kind === "scatter") {
+    drawCube(p.x - 0.35, y, p.z - 0.1, 0.7, 0.18, 0.2, [1, 0.5, 0.1], 0.6, vp);
+    drawCube(p.x - 0.35, y - 0.18, p.z - 0.08, 0.16, 0.2, 0.16, [0.2, 0.2, 0.25], 0, vp);
+  } else {
+    const col = p.kind === "ammo" ? [1, 0.82, 0.2] : [0.95, 0.25, 0.9];
+    drawCube(p.x - h, y, p.z - h, s, s, s, col, 0.45, vp);
+  }
+}
+
+function drawCheckpoints(vp) {
+  for (const r of rooms) {
+    if (!r.cp) continue;
+    const c = r.cp, on = c.active, glow = on ? 0.8 : 0.15 + 0.1 * Math.sin(G.time * 3);
+    const col = on ? [0.3, 1, 0.4] : [0.5, 0.6, 0.7];
+    for (const sx of [-2.2, 1.9]) {
+      drawCube(c.x + sx, c.y, c.z - 0.15, 0.3, 1.8, 0.3, [0.25, 0.27, 0.32], 0, vp);
+      drawCube(c.x + sx - 0.05, c.y + 1.8, c.z - 0.2, 0.4, 0.4, 0.4, col, glow, vp);
+    }
+  }
 }
 
 function drawGun(proj) {
@@ -1187,6 +1545,12 @@ function frame(now) {
   document.getElementById("muzzle").classList.toggle("flash", G.muzzle > 0);
   document.getElementById("hurt").classList.toggle("show", G.hurtFlash > 0);
   document.getElementById("crosshair").classList.toggle("hit", G.hitmark > 0);
+  G.dmgDirT = Math.max(0, G.dmgDirT - dt);
+  const dd = document.getElementById("dmg-dir");
+  if (G.dmgDirT > 0 && G.mode === "play") {
+    dd.style.opacity = Math.min(1, G.dmgDirT * 1.6).toFixed(2);
+    dd.style.transform = "rotate(" + (G.dmgDir - P.yaw).toFixed(3) + "rad)";
+  } else if (dd.style.opacity !== "0") dd.style.opacity = "0";
 
   if (G.mode === "play") {
     if (G.reload > 0) {
@@ -1198,12 +1562,22 @@ function frame(now) {
         updateHUD();
       }
     }
+    if (G.bot) botThink(dt);
     updatePlayer(dt);
+    updateCheckpoints();
+    // health regen after a short break from taking damage
+    if (G.regenT > 0) G.regenT -= dt;
+    else if (G.hp < MAX_HP) { G.hp = Math.min(MAX_HP, G.hp + DIFFS[G.diff].regenRate * dt); updateHpBar(); }
+    // never soft-lock on ammo: a trickle of emergency rounds when completely dry
+    if (G.ammo === 0 && G.reserve === 0 && G.reload <= 0 && G.weapon === 0) {
+      G.emergencyT += dt;
+      if (G.emergencyT > 2) { G.emergencyT = 0; G.reserve += 6; toast("EMERGENCY AMMO +6", "#ffd23f"); tryReload(); updateHUD(); }
+    } else G.emergencyT = 0;
     updateEnemies(dt);
     updateBolts(dt);
     updatePickups(dt);
     G.shotCd = Math.max(0, G.shotCd - dt);
-    if (shooting && G.shotCd <= 0) { shoot(); G.shotCd = 0.16; }
+    if (shooting && G.shotCd <= 0) shoot();
   } else {
     wasShooting = false;
   }
@@ -1245,13 +1619,9 @@ function frame(now) {
   drawMesh(worldMesh, IDENT, vp, [1,1,1], 0);
 
   for (const e of enemies) if (e.hp > 0) drawEnemy(e, vp);
-  for (const b of bolts) drawCube(b.x - 0.08, b.y - 0.08, b.z - 0.08, 0.16, 0.16, 0.16, [1,0.35,0.15], 1, vp);
-  for (const p of pickups) {
-    if (!p.alive) continue;
-    const y = p.y + Math.sin(p.t * 3) * 0.12;
-    const col = p.kind === "ammo" ? [1, 0.82, 0.2] : [0.95, 0.25, 0.9];
-    drawCube(p.x - 0.18, y, p.z - 0.18, 0.36, 0.36, 0.36, col, 0.45, vp);
-  }
+  drawCheckpoints(vp);
+  for (const b of bolts) drawCube(b.x - 0.13, b.y - 0.13, b.z - 0.13, 0.26, 0.26, 0.26, [1,0.35,0.15], 1, vp);
+  for (const p of pickups) if (p.alive) drawPickup(p, vp);
   for (const p of parts) {
     const k = Math.max(0.04, p.s * (p.life * 2));
     drawCube(p.x, p.y, p.z, k, k, k, p.col, 0.4, vp);
@@ -1273,6 +1643,9 @@ window.addEventListener("keydown", e => {
   keys[e.code] = true;
   keys[e.key] = true;
   if (e.code === "KeyR") tryReload();
+  if (e.code === "KeyQ") switchWeapon();
+  if (e.code === "Digit1") switchWeapon(0);
+  if (e.code === "Digit2") switchWeapon(1);
   if (e.code === "Space") e.preventDefault();
   if (e.code === "KeyP" && G.mode === "title") startRun();
 });
@@ -1426,10 +1799,12 @@ document.addEventListener("pointerlockchange", () => {
   holdBtn(btnFire, () => {
     if (G.mode !== "play") return;
     shooting = true;
-    if (G.shotCd <= 0) { shoot(); G.shotCd = 0.16; }
+    if (G.shotCd <= 0) shoot();
   }, () => { shooting = false; });
   holdBtn(btnJump, () => { touch.jump = true; touch.jumpQueued = true; }, () => { touch.jump = false; });
   holdBtn(btnReload, () => { if (G.mode === "play") tryReload(); }, null);
+  const btnSwap = document.getElementById("btn-swap");
+  if (btnSwap) holdBtn(btnSwap, () => switchWeapon(), null);
 
   window.addEventListener("pointerdown", e => {
     if (e.pointerType === "touch" || e.pointerType === "pen") enableTouchUI();
@@ -1444,11 +1819,91 @@ document.addEventListener("pointerlockchange", () => {
   });
 })();
 
+function refreshTitle() {
+  document.querySelectorAll("#diff-row button").forEach(b => b.classList.toggle("on", +b.dataset.d === G.diff));
+  document.getElementById("diff-desc").textContent = DIFFS[G.diff].desc;
+  const parts = DIFFS.map(d => STORE.best[d.name] ? d.name + " " + STORE.best[d.name] : "").filter(Boolean);
+  document.getElementById("title-best").textContent = parts.length ? "BEST · " + parts.join(" · ") : "";
+}
+document.querySelectorAll("#diff-row button").forEach(b => b.addEventListener("click", e => {
+  e.preventDefault(); G.diff = +b.dataset.d; STORE.diff = G.diff; saveStore(STORE); refreshTitle();
+}));
+refreshTitle();
 document.getElementById("play-btn").addEventListener("click", startRun);
 document.getElementById("retry-btn").addEventListener("click", startRun);
 document.getElementById("again-btn").addEventListener("click", startRun);
-document.getElementById("dead-menu-btn").addEventListener("click", () => { G.mode = "title"; showOverlay("title"); });
-document.getElementById("win-menu-btn").addEventListener("click", () => { G.mode = "title"; showOverlay("title"); });
+document.getElementById("dead-menu-btn").addEventListener("click", () => { G.mode = "title"; showOverlay("title"); refreshTitle(); });
+document.getElementById("win-menu-btn").addEventListener("click", () => { G.mode = "title"; showOverlay("title"); refreshTitle(); });
+
+
+// ---------- autopilot bot (used by automated smoke tests) ----------
+let botWps = [], botWi = 0, botStuck = 0, botStrafeT = 0, botStrafe = 1;
+function buildBotPath() {
+  botWps = []; botWi = 0;
+  for (const r of rooms) {
+    const cx = (r.door !== undefined ? r.door : r.x + (r.w >> 1) - 1) + 1.5;
+    if (r.type === "start") { botWps.push({ x: cx, z: r.z + r.d - 1.2 }); continue; }
+    if (r.type === "extract") { botWps.push({ x: cx, z: r.z + 1.5 }); botWps.push({ x: extract.x + 2, z: extract.z + 2 }); continue; }
+    botWps.push({ x: cx, z: r.z + 1.5 });
+    botWps.push({ x: cx, z: r.z + r.d - 1.2 });
+  }
+}
+function angWrap(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
+function botThink(dt) {
+  if (!botWps.length) buildBotPath();
+  let tgt = null, bd = 1e9;
+  for (const e of enemies) {
+    if (e.hp <= 0) continue;
+    const d = Math.hypot(e.x - P.x, e.z - P.z);
+    if (d < 20 && d < bd && (e.see || (d < 12 && los(P.x, P.y + P.eye, P.z, e.x, e.y + 0.6, e.z)))) { bd = d; tgt = e; }
+  }
+  touch.moveX = 0; touch.moveY = 0;
+  if (tgt) {
+    const ty = tgt.y + (tgt.kind === "tank" ? 0.8 : tgt.fly ? 0.2 : 0.6);
+    const dx = tgt.x - P.x, dz = tgt.z - P.z, hd = Math.hypot(dx, dz);
+    const wantYaw = Math.atan2(dx, -dz), wantPitch = -Math.atan2(ty - (P.y + P.eye), hd);
+    const dy = angWrap(wantYaw - P.yaw), dp = wantPitch - P.pitch;
+    const rate = 5 * dt;
+    P.yaw += clamp(dy, -rate, rate); P.pitch += clamp(dp, -rate, rate);
+    shooting = Math.abs(dy) < 0.09 && Math.abs(dp) < 0.12;
+    if (G.weapon === 0 && G.shells > 0 && hd < 5) switchWeapon(1);
+    botStrafeT -= dt; if (botStrafeT <= 0) { botStrafeT = 0.8 + Math.random(); botStrafe = -botStrafe; }
+    touch.moveX = botStrafe * 0.6;
+    if (hd < 3) touch.moveY = 0.6; // back off a little from melee bots
+    return;
+  }
+  shooting = false;
+  if (G.ammo < MAG && G.reserve > 0 && G.reload <= 0) tryReload();
+  const wp = botWps[Math.min(botWi, botWps.length - 1)];
+  const dx = wp.x - P.x, dz = wp.z - P.z, d = Math.hypot(dx, dz);
+  if (d < 1.1 && botWi < botWps.length - 1) botWi++;
+  const wantYaw = Math.atan2(dx, -dz), dy = angWrap(wantYaw - P.yaw);
+  P.yaw += clamp(dy, -6 * dt, 6 * dt);
+  P.pitch += clamp(-P.pitch, -3 * dt, 3 * dt);
+  if (Math.abs(dy) < 0.6) touch.moveY = -1;
+  const sp = Math.hypot(P.vx, P.vz);
+  botStuck = touch.moveY && sp < 0.6 ? botStuck + dt : 0;
+  if (botStuck > 0.5) { touch.jumpQueued = true; touch.moveX = Math.random() < 0.5 ? -1 : 1; botStuck = 0; }
+}
+
+window.__vox = {
+  get mode() { return G.mode; }, get lives() { return G.lives; }, get hp() { return Math.round(G.hp); }, get score() { return G.score; },
+  get kills() { return G.kills; }, get maxRoom() { return G.maxRoom; }, get rooms() { return rooms.length; }, get diff() { return DIFFS[G.diff].name; },
+  get enemies() { return enemies.filter(e => e.hp > 0).map(e => e.kind); }, get best() { return Object.assign({}, STORE.best); },
+  get dmgTaken() { return G.dmgTaken; }, get weapon() { return G.weapon; }, get ammo() { return [G.ammo, G.reserve, G.shells]; },
+  get winding() { return enemies.filter(e => e.hp > 0 && e.windup > 0).length; },
+  faceNearest() {
+    let t = null, bd = 1e9;
+    for (const e of enemies) { if (e.hp <= 0) continue; const d = Math.hypot(e.x - P.x, e.z - P.z) + (e.windup > 0 ? -100 : 0); if (d < bd) { bd = d; t = e; } }
+    if (!t) return false;
+    P.yaw = Math.atan2(t.x - P.x, -(t.z - P.z)); P.pitch = -Math.atan2(t.y + 0.6 - (P.y + P.eye), Math.hypot(t.x - P.x, t.z - P.z)); return true;
+  },
+  get pickups() { return pickups.filter(p => p.alive).map(p => p.kind); },
+  start(d) { G.bot = !!this._bot; startRun(d); buildBotPath(); },
+  setBot(on) { this._bot = !!on; G.bot = !!on; if (on) buildBotPath(); else { touch.moveX = touch.moveY = 0; shooting = false; } },
+  setGod(on) { G.god = !!on; },
+  tp(i) { const r = rooms[i]; if (!r) return false; P.x = r.door + 1.5; P.y = r.fy + 1.01; P.z = r.z + 2; P.vx = P.vy = P.vz = 0; P.yaw = Math.PI; return true; },
+};
 
 if (prefersTouch()) enableTouchUI();
 generate((Date.now() ^ 0x9e3779b9) >>> 0);
