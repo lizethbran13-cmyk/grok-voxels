@@ -37,6 +37,10 @@
   <div id="hurt"></div>
   <div id="dmg-dir"><i></i></div>
   <div id="toast"></div>
+  <div id="mp-tags"></div>
+  <div id="mp-side"><button type="button" id="mp-menu-btn" aria-label="Co-op menu">MENU</button><div id="mp-party"></div></div>
+  <div id="mp-status"><span></span><i><u></u></i></div>
+  <div id="mp-notice"></div>
   <div id="gun-kick"></div>
 
   <div id="touch-ui" aria-hidden="true">
@@ -52,6 +56,7 @@
       <button type="button" id="btn-jump">JUMP</button>
       <button type="button" id="btn-fire">FIRE</button>
     </div>
+    <button type="button" id="btn-revive" class="hidden">HOLD<br>REVIVE</button>
   </div>
 
   <div id="overlay" class="show">
@@ -78,6 +83,14 @@
       <p class="best-line" id="title-best"></p>
     </div>
 
+    <div class="card hidden" id="mp-card">
+      <p class="tag" id="mp-kicker">CO-OP</p>
+      <h2 id="mp-title">CO-OP</h2>
+      <p class="result" id="mp-msg"></p>
+      <div id="mp-roster"></div>
+      <div id="mp-btns"></div>
+    </div>
+
     <div class="card hidden" id="dead-card">
       <h2>WIPED OUT</h2>
       <p class="result" id="dead-msg">The bots got you.</p>
@@ -95,6 +108,7 @@
     </div>
   </div>
 
+  <script src="grok-net.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

@@ -356,3 +356,64 @@ body.touch .controls li:not(.touch-note) { display: none; }
   body.touch .blurb { display: none; }
   .tag { margin-bottom: 6px; }
 }
+
+/* ---------- online co-op (only with ?mp= from the Grok Arcade lobby) ---------- */
+#mp-tags, #mp-side, #mp-status, #mp-notice, #mp-title-info { display: none; }
+body.mp #mp-tags { display: block; position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+body.mp:not(.menu) #mp-side { display: flex; }
+body.mp #mp-status, body.mp #mp-notice { display: block; }
+body.mp #mp-title-info { display: block; margin: 4px 0 10px; color: #b8f4ff; font-size: 14px; letter-spacing: 1px; }
+#mp-title-info b { color: #fff56a; }
+#mp-title-roster { margin-top: 6px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; align-items: center; }
+#mp-title-roster small { color: #9fc3dc; }
+.mp-tag { position: absolute; left: 0; top: 0; width: 0; height: 0; }
+.mp-tag.hidden { display: none; }
+.mp-tag b { position: absolute; left: 0; bottom: 8px; transform: translateX(-50%); white-space: nowrap;
+  background: rgba(8,16,32,.82); border: 3px solid var(--c); color: #fff; font-size: 15px; letter-spacing: 1px; padding: 2px 9px; box-shadow: 3px 3px 0 #041018; }
+.mp-tag i { position: absolute; left: -28px; bottom: 0; width: 56px; height: 6px; background: rgba(0,0,0,.6); border: 1px solid #000; }
+.mp-tag i u { display: block; height: 100%; width: 100%; background: #7dff5a; }
+.mp-tag em { position: absolute; left: 0; top: 6px; transform: translateX(-50%); white-space: nowrap; font-style: normal; font-weight: 900; font-size: 15px;
+  color: #ff3d6e; text-shadow: 2px 2px 0 #041018; animation: pulse .45s infinite alternate; }
+.mp-tag.down b { border-color: #ff3d6e; }
+#mp-side { position: fixed; z-index: 9; left: calc(16px + env(safe-area-inset-left, 0px)); top: calc(92px + env(safe-area-inset-top, 0px));
+  flex-direction: column; align-items: flex-start; gap: 6px; pointer-events: none; }
+#mp-menu-btn { pointer-events: auto; font: inherit; font-weight: 800; letter-spacing: 2px; font-size: 13px; padding: 8px 12px; min-height: 40px;
+  background: rgba(8,16,32,.8); color: #1ce0ff; border: 3px solid #1ce0ff; box-shadow: 3px 3px 0 #041018; cursor: pointer; touch-action: manipulation; }
+.mp-row { display: flex; align-items: center; gap: 6px; background: rgba(8,16,32,.78); border: 3px solid var(--c); padding: 4px 8px; box-shadow: 3px 3px 0 #041018; }
+.mp-row b { font-size: 14px; color: #fff; letter-spacing: 1px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-row i { width: 64px; height: 9px; background: rgba(255,255,255,.15); border: 2px solid rgba(0,0,0,.5); }
+.mp-row i u { display: block; height: 100%; width: 100%; background: #7dff5a; }
+.mp-row i u.mid, .mp-tag i u.mid { background: #fff56a; }
+.mp-row i u.crit { background: #ff3d6e; }
+.mp-row em { display: none; font-style: normal; font-weight: 900; font-size: 12px; color: #fff; background: #ff3d6e; padding: 1px 5px; animation: pulse .45s infinite alternate; }
+.mp-row.down em { display: inline; }
+.mp-row.off { opacity: .45; }
+.mp-you { font-size: 14px; letter-spacing: 2px; color: #fff56a; }
+#mp-status { position: fixed; left: 50%; top: 62%; transform: translate(-50%, 0); z-index: 7; pointer-events: none; text-align: center; opacity: 0; transition: opacity .2s; }
+#mp-status.show { opacity: 1; }
+#mp-status span { display: inline-block; background: rgba(8,16,32,.85); border: 3px solid #7dff5a; color: #fff; font-weight: 900; letter-spacing: 2px; font-size: 18px;
+  padding: 6px 14px; box-shadow: 3px 3px 0 #041018; white-space: nowrap; }
+#mp-status i { display: block; width: 220px; height: 12px; margin: 6px auto 0; background: rgba(0,0,0,.6); border: 2px solid #fff; }
+#mp-status i u { display: block; height: 100%; width: 0; background: #7dff5a; }
+#mp-notice { position: fixed; left: 50%; bottom: calc(44px + env(safe-area-inset-bottom, 0px)); transform: translate(-50%, 8px); z-index: 25; pointer-events: none;
+  background: rgba(8,16,32,.9); border: 3px solid #1ce0ff; color: #fff; font-size: 16px; letter-spacing: 1px; padding: 6px 14px; max-width: 70vw; text-align: center;
+  opacity: 0; transition: opacity .25s, transform .25s; box-shadow: 3px 3px 0 #041018; }
+#mp-notice.show { opacity: 1; transform: translate(-50%, 0); }
+#mp-notice b { color: #fff56a; }
+#btn-revive { position: absolute; z-index: 10; pointer-events: auto; touch-action: none;
+  right: calc(196px + env(safe-area-inset-right, 0px)); bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  width: 124px; height: 84px; font: inherit; font-weight: 900; font-size: 20px; letter-spacing: 2px; line-height: 1.05;
+  background: #7dff5a; color: #06101c; border: 4px solid #fff; box-shadow: 4px 4px 0 #041018, 0 0 22px rgba(125,255,90,.7); animation: mpGlow .5s infinite alternate; }
+@keyframes mpGlow { from { box-shadow: 4px 4px 0 #041018, 0 0 8px rgba(125,255,90,.5); } to { box-shadow: 4px 4px 0 #041018, 0 0 30px rgba(125,255,90,1); background: #a8ff8c; } }
+#btn-revive.hidden { display: none; }
+@media (max-aspect-ratio: 1/1) { #btn-revive { right: calc(16px + env(safe-area-inset-right, 0px)); bottom: calc(182px + env(safe-area-inset-bottom, 0px)); } }
+#mp-roster { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 6px 0 14px; }
+.mp-pl { display: inline-block; border: 3px solid var(--c); padding: 3px 10px; color: #fff; font-weight: 800; letter-spacing: 1px; background: rgba(0,0,0,.3); }
+.mp-pl small { color: #9fc3dc; font-size: 10px; }
+.mp-note { color: #b8f4ff; margin: 0 0 12px; }
+.mp-note.hidden, #again-btn.hidden { display: none; }
+body.mp #hint { bottom: calc(52px + env(safe-area-inset-bottom, 0px)); }
+body.mp #toast { white-space: normal; width: max-content; max-width: 92vw; text-align: center; line-height: 1.25; }
+#mp-status span { white-space: normal; max-width: 90vw; line-height: 1.3; }
+@media (max-width: 520px) { body.mp #toast { font-size: 17px; letter-spacing: 1px; } #mp-status span { font-size: 15px; letter-spacing: 1px; } }
+@media (max-aspect-ratio: 1/1) { body.mp #toast { top: 34%; } }
