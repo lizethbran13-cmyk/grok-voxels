@@ -6,9 +6,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>GROK VOXELS 2.0</title>
+  <title>GROK VOXELS 3.0</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 fill=%27%231ce0ff%27/%3E%3Crect x=%274%27 y=%274%27 width=%278%27 height=%278%27 fill=%27%23fff56a%27/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=3" />
 </head>
 <body>
   <canvas id="c"></canvas>
@@ -29,6 +29,8 @@
     <div id="seed-chip" class="hud-panel">COURSE #0000</div>
     <div id="hint">CLICK TO LOCK MOUSE · WASD MOVE · LMB SHOOT</div>
   </div>
+  <div id="wbar" class="solo"></div>
+  <div id="boss-bar"><b>THE OVERSEER</b><i><u></u></i></div>
 
   <div id="crosshair">
     <i class="ch h"></i><i class="ch v"></i><i class="ch d"></i>
@@ -64,20 +66,22 @@
       <div class="logo-cubes" aria-hidden="true">
         <span></span><span></span><span></span><span></span>
       </div>
-      <h1>GROK VOXELS <span class="ver">2.0</span></h1>
-      <p class="tag">RANDOMIZED COURSES · THREE LIVES · EXTRACT ALIVE</p>
-      <p class="blurb">Blast cube-bots through a brand-new voxel gauntlet every run. Health regenerates, checkpoints save your progress, and bots <b>glow before they fire</b> — dodge!</p>
+      <h1>GROK VOXELS <span class="ver">3.0</span></h1>
+      <p class="tag">HANDCRAFTED LEVELS · RANDOM COURSES · EXTRACT ALIVE</p>
+      <p class="blurb">New: a Secret Lab, an Area 51 hangar with a boss, Neon City rooftops, a Volcano Forge and a Frozen Base. Find the <b>laser rifle, rockets and freeze ray</b>. Bots <b>glow before they fire</b>, so dodge!</p>
       <div class="diff-row" id="diff-row">
         <button type="button" data-d="0">EASY</button><button type="button" data-d="1">NORMAL</button><button type="button" data-d="2">HARD</button>
       </div>
       <p class="diff-desc" id="diff-desc"></p>
+      <div class="lvl-row" id="lvl-row"></div>
+      <p class="lvl-desc" id="lvl-desc"></p>
       <ul class="controls">
         <li><kbd>W A S D</kbd> move</li>
         <li><kbd>Mouse</kbd> look · <kbd>LMB</kbd> shoot</li>
         <li><kbd>Space</kbd> jump · <kbd>Shift</kbd> sprint</li>
-        <li><kbd>R</kbd> reload · <kbd>Q</kbd> swap gun</li>
+        <li><kbd>R</kbd> reload · <kbd>Q</kbd>/<kbd>1-5</kbd>/<kbd>wheel</kbd> switch gun</li>
         <li class="touch-note"><kbd>Joystick</kbd> left side to move · <kbd>Swipe</kbd> right side to look</li>
-        <li class="touch-note"><kbd>FIRE</kbd> shoot (aim assist on) · <kbd>JUMP</kbd> · <kbd>RELOAD</kbd> · <kbd>SWAP</kbd></li>
+        <li class="touch-note"><kbd>FIRE</kbd> shoot (aim assist on) · <kbd>JUMP</kbd> · <kbd>RELOAD</kbd> · <kbd>SWAP</kbd> or tap the gun bar</li>
       </ul>
       <button id="play-btn" class="btn primary">PLAY</button>
       <p class="best-line" id="title-best"></p>
@@ -95,7 +99,7 @@
       <h2>WIPED OUT</h2>
       <p class="result" id="dead-msg">The bots got you.</p>
       <p class="stats" id="dead-stats"></p>
-      <button id="retry-btn" class="btn primary">RETRY · NEW COURSE</button>
+      <button id="retry-btn" class="btn primary">RETRY</button>
       <button id="dead-menu-btn" class="btn ghost">TITLE</button>
     </div>
 
@@ -108,7 +112,7 @@
     </div>
   </div>
 
-  <script src="grok-net.js"></script>
-  <script src="game.js"></script>
+  <script src="grok-net.js?v=3"></script>
+  <script src="game.js?v=3"></script>
 </body>
 </html>
