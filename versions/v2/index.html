@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>/* Grok Arcade Hall of Game Records: archived old version 2.0 of grok-voxels. Saves are kept separate from the newest version. */
+(function(){var P='grokOldVersion.grok-voxels.v2:';try{var S=Storage.prototype,g=S.getItem,s=S.setItem,r=S.removeItem;function L(t){try{return t===window.localStorage;}catch(e){return false;}}
+S.getItem=function(k){return g.call(this,L(this)?P+k:k);};S.setItem=function(k,v){return s.call(this,L(this)?P+k:k,v);};S.removeItem=function(k){return r.call(this,L(this)?P+k:k);};}catch(e){}
+window.GROK_OLD_VERSION={repo:'grok-voxels',label:'v2',ver:'2.0',prefix:P};
+function badge(){try{var d=document.createElement('div');d.id='grokOldVerBadge';d.setAttribute('style','position:fixed;left:50%;top:6px;transform:translateX(-50%);z-index:2147483647;background:rgba(20,10,43,.92);color:#ffe14d;font:bold 12px/1.3 system-ui,sans-serif;padding:6px 12px;border-radius:14px;border:2px solid #ff4fd8;box-shadow:0 2px 10px rgba(0,0,0,.4);pointer-events:none;transition:opacity .8s;text-align:center;max-width:90vw');d.textContent='\uD83D\uDCFC OLD VERSION 2.0 \u00b7 from the Hall of Game Records \u00b7 separate save';document.body.appendChild(d);setTimeout(function(){d.style.opacity='0';},6000);setTimeout(function(){if(d.parentNode)d.parentNode.removeChild(d);},7000);}catch(e){}}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',badge);else badge();})();</script>
+<meta name="robots" content="noindex">
+
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>GROK VOXELS 2.0</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 fill=%27%231ce0ff%27/%3E%3Crect x=%274%27 y=%274%27 width=%278%27 height=%278%27 fill=%27%23fff56a%27/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <canvas id="minimap" width="168" height="168"></canvas>
+
+  <div id="hud">
+    <div id="hud-top">
+      <div id="lives" class="hud-panel"><div id="hearts"></div><div id="hp-bar"><i id="hp-fill"></i></div></div>
+      <div id="score-box" class="hud-panel">
+        <span class="label">SCORE</span>
+        <span id="score">0</span>
+      </div>
+      <div id="ammo-box" class="hud-panel">
+        <span class="label" id="ammo-label">BLASTER</span>
+        <span id="ammo">12 / 36</span>
+      </div>
+    </div>
+    <div id="seed-chip" class="hud-panel">COURSE #0000</div>
+    <div id="hint">CLICK TO LOCK MOUSE · WASD MOVE · LMB SHOOT</div>
+  </div>
+
+  <div id="crosshair">
+    <i class="ch h"></i><i class="ch v"></i><i class="ch d"></i>
+  </div>
+  <div id="muzzle"></div>
+  <div id="hurt"></div>
+  <div id="dmg-dir"><i></i></div>
+  <div id="toast"></div>
+  <div id="mp-tags"></div>
+  <div id="mp-side"><button type="button" id="mp-menu-btn" aria-label="Co-op menu">MENU</button><div id="mp-party"></div></div>
+  <div id="mp-status"><span></span><i><u></u></i></div>
+  <div id="mp-notice"></div>
+  <div id="gun-kick"></div>
+
+  <div id="touch-ui" aria-hidden="true">
+    <div id="joy-zone">
+      <div id="joy-base">
+        <div id="joy-stick"></div>
+      </div>
+    </div>
+    <div id="look-zone"></div>
+    <div id="touch-btns">
+      <button type="button" id="btn-swap" class="hidden">SWAP</button>
+      <button type="button" id="btn-reload">RELOAD</button>
+      <button type="button" id="btn-jump">JUMP</button>
+      <button type="button" id="btn-fire">FIRE</button>
+    </div>
+    <button type="button" id="btn-revive" class="hidden">HOLD<br>REVIVE</button>
+  </div>
+
+  <div id="overlay" class="show">
+    <div class="card" id="title-card">
+      <div class="logo-cubes" aria-hidden="true">
+        <span></span><span></span><span></span><span></span>
+      </div>
+      <h1>GROK VOXELS <span class="ver">2.0</span></h1>
+      <p class="tag">RANDOMIZED COURSES · THREE LIVES · EXTRACT ALIVE</p>
+      <p class="blurb">Blast cube-bots through a brand-new voxel gauntlet every run. Health regenerates, checkpoints save your progress, and bots <b>glow before they fire</b> — dodge!</p>
+      <div class="diff-row" id="diff-row">
+        <button type="button" data-d="0">EASY</button><button type="button" data-d="1">NORMAL</button><button type="button" data-d="2">HARD</button>
+      </div>
+      <p class="diff-desc" id="diff-desc"></p>
+      <ul class="controls">
+        <li><kbd>W A S D</kbd> move</li>
+        <li><kbd>Mouse</kbd> look · <kbd>LMB</kbd> shoot</li>
+        <li><kbd>Space</kbd> jump · <kbd>Shift</kbd> sprint</li>
+        <li><kbd>R</kbd> reload · <kbd>Q</kbd> swap gun</li>
+        <li class="touch-note"><kbd>Joystick</kbd> left side to move · <kbd>Swipe</kbd> right side to look</li>
+        <li class="touch-note"><kbd>FIRE</kbd> shoot (aim assist on) · <kbd>JUMP</kbd> · <kbd>RELOAD</kbd> · <kbd>SWAP</kbd></li>
+      </ul>
+      <button id="play-btn" class="btn primary">PLAY</button>
+      <p class="best-line" id="title-best"></p>
+    </div>
+
+    <div class="card hidden" id="mp-card">
+      <p class="tag" id="mp-kicker">CO-OP</p>
+      <h2 id="mp-title">CO-OP</h2>
+      <p class="result" id="mp-msg"></p>
+      <div id="mp-roster"></div>
+      <div id="mp-btns"></div>
+    </div>
+
+    <div class="card hidden" id="dead-card">
+      <h2>WIPED OUT</h2>
+      <p class="result" id="dead-msg">The bots got you.</p>
+      <p class="stats" id="dead-stats"></p>
+      <button id="retry-btn" class="btn primary">RETRY · NEW COURSE</button>
+      <button id="dead-menu-btn" class="btn ghost">TITLE</button>
+    </div>
+
+    <div class="card hidden" id="win-card">
+      <h2>EXTRACTED</h2>
+      <p class="result">You made it to the pad.</p>
+      <p class="stats" id="win-stats"></p>
+      <button id="again-btn" class="btn primary">PLAY AGAIN · NEW COURSE</button>
+      <button id="win-menu-btn" class="btn ghost">TITLE</button>
+    </div>
+  </div>
+
+  <script src="grok-net.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
