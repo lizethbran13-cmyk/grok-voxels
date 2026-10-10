@@ -1,4 +1,4 @@
-GROK VOXELS 3.0
+GROK VOXELS 3.1
 Open this folder with a local static server, then load index.html.
 
   python3 -m http.server 8080
@@ -13,6 +13,23 @@ Phone: left joystick to move, swipe the right side to look, FIRE / JUMP / RELOAD
 Pointer lock is desktop-only; tap PLAY on a phone to start immediately.
 
 A single-file copy also lives at /workspace/GrokVoxels.html (save that one file to play offline).
+
+What's new in 3.1
+  FREE for everyone:
+  * 3RD-PERSON CAMERA: V, the 1ST/3RD button, or the title screen. Over-the-shoulder
+    camera that pulls in near walls; shots go where the crosshair points.
+  * ASSIST MODE (title screen): 150 health, 40% less damage, faster healing,
+    extra ammo, stronger aim assist and no fall damage.
+  RATITA INDUSTRIES ITEM PACK (Mini Pack DLC, unlock in the Grok Arcade DLC Shop;
+  key grokDLC.voxels.ratita_industries_item_pack). Gear from Luna, Pi-rat and Snowie's lab:
+  * CHEESE CANNON (6): lobbed cheese wheels with a gooey splash.
+  * SQUEAK ZAPPER (7): chain lightning that hops to 3 more bots.
+  * SNOWIE SPRAYER (8): rapid snowballs that freeze bots solid.
+  * Gadgets (F use, T switch; phone: GADGET button, tap the chip to switch):
+    ROBO-RAT BUDDY drone (zaps bots for 15 s), BUBBLE SHIELD (5 s), JET TAIL hop.
+  * 5 skins: Luna Lab Coat, Pi-rat Captain (eyepatch!), Snowie Frost Suit, Ratita CEO,
+    Robo-Rat MK1. You see them in 3rd person, and co-op partners see them too.
+  * Unlocks live (no reload). In co-op the host's pack is shared with guests.
 
 What's new in 3.0
   * Five handcrafted levels with their own look, props, lighting and fog:
