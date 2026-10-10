@@ -1,4 +1,4 @@
-/* GROK VOXELS 3.0 — first-person voxel shooter, no build step */
+/* GROK VOXELS 3.1 — first/third-person voxel shooter, no build step */
 (() => {
 "use strict";
 
@@ -35,6 +35,10 @@ if (typeof STORE.diff !== "number") STORE.diff = 0; // first-timers start on Eas
 if (typeof STORE.lvl !== "number") STORE.lvl = -1;  // 3.0 level select: -1 = MIX (handcrafted levels rotate with random courses)
 if (typeof STORE.rot !== "number") STORE.rot = 0;
 if (!STORE.clear) STORE.clear = {};
+if (typeof STORE.cam3 !== "boolean") STORE.cam3 = false;   // free 3rd-person camera
+if (typeof STORE.assist !== "boolean") STORE.assist = false; // free Assist Mode
+if (typeof STORE.skin !== "string") STORE.skin = "classic";
+function maxHp() { return STORE.assist ? 150 : MAX_HP; }
 
 const PAL = [
   [0,0,0],
@@ -1278,8 +1282,9 @@ function toast(text, color) {
 
 function hurtPlayer(amount, src) {
   if (G.mode !== "play" || G.invuln > 0 || G.god || NET.down) return;
+  if (G.shieldT > 0) { ratShieldPing(); return; } // Ratita BUBBLE SHIELD
   const Dd = DIFFS[G.diff];
-  const dmg = Math.max(1, Math.round((amount || DMG.bolt) * Dd.dmg));
+  const dmg = Math.max(1, Math.round((amount || DMG.bolt) * Dd.dmg * (STORE.assist ? 0.6 : 1)));
   G.hp -= dmg;
   G.regenT = Dd.regenDelay;
   G.invuln = 0.3;                 // brief i-frames so a burst can't delete you
@@ -1311,7 +1316,7 @@ function respawnAtCheckpoint() {
 function loseLife() {
   G.lives--;
   if (G.lives <= 0) { G.hp = 0; updateHUD(); die(); return; }
-  G.hp = MAX_HP;
+  G.hp = maxHp();
   G.invuln = 2.2;
   G.regenT = 0;
   if (G.ammo + G.reserve < MAG) G.reserve = MAG - G.ammo; // never respawn empty
@@ -1377,7 +1382,7 @@ function startRun(diff, seedArg, lvlArg) {
   generate(seed, lvl);
   G.mode = "play";
   G.lives = MAX_LIVES;
-  G.hp = MAX_HP;
+  G.hp = maxHp();
   G.regenT = 0;
   G.score = 0;
   G.kills = 0;
@@ -1385,7 +1390,8 @@ function startRun(diff, seedArg, lvlArg) {
   G.ammo = MAG;
   G.reserve = RESERVE_START + DIFFS[G.diff].reserve;
   G.shells = 0; G.cells = 0; G.rockets = 0; G.cryo = 0;
-  G.got = [true, false, false, false, false];
+  G.got = [true, false, false, false, false, false, false, false];
+  ratStartRun();
   G.weapon = 0; G.lavaT = 0;
   G.reload = 0;
   G.invuln = 1.0;
@@ -1471,8 +1477,9 @@ function updateHpBar() {
   if (v === hpShown) return;
   hpShown = v;
   const fill = document.getElementById("hp-fill");
-  fill.style.width = v + "%";
-  fill.className = v < 30 ? "crit" : v < 60 ? "mid" : "";
+  const pc = v / maxHp() * 100;
+  fill.style.width = pc + "%";
+  fill.className = pc < 30 ? "crit" : pc < 60 ? "mid" : "";
 }
 
 function tryReload() {
@@ -1490,11 +1497,15 @@ const WEAP = [
   { name: "LASER", full: "LASER RIFLE", key: "cells", unit: "CELLS", pick: 18, max: 54, col: [1, 0.25, 0.75] },
   { name: "ROCKETS", full: "ROCKET LAUNCHER", key: "rockets", unit: "ROCKETS", pick: 4, max: 10, col: [0.45, 0.9, 0.3] },
   { name: "FREEZE", full: "FREEZE RAY", key: "cryo", unit: "CRYO", pick: 60, max: 150, col: [0.45, 0.9, 1] },
+  // Ratita Industries Item Pack (DLC)
+  { name: "CHEESE", full: "CHEESE CANNON", key: "cheese", unit: "WHEELS", pick: 3, max: 16, col: [1, 0.8, 0.2], rat: true },
+  { name: "ZAPPER", full: "SQUEAK ZAPPER", key: "zap", unit: "SQUEAKS", pick: 8, max: 40, col: [0.55, 0.78, 1], rat: true },
+  { name: "SNOWIE", full: "SNOWIE SPRAYER", key: "snow", unit: "SNOWBALLS", pick: 30, max: 90, col: [0.88, 0.96, 1], rat: true },
 ];
 const WPICK = { scatter: 1, laser: 2, rocket: 3, freeze: 4 };
 function rgbHex(c) { return "#" + c.map(v => Math.round(clamp(v, 0, 1) * 255).toString(16).padStart(2, "0")).join(""); }
 function wAmmo(i) { return i === 0 ? G.ammo + G.reserve : (G[WEAP[i].key] | 0); }
-function wOwned(i) { return i === 0 || !!(G.got && G.got[i]); }
+function wOwned(i) { return i === 0 || (i >= 5 && !ratOwned() ? false : !!(G.got && G.got[i])); }
 function switchWeapon(to) {
   if (G.mode !== "play") return;
   let next = to;
@@ -1513,7 +1524,7 @@ function emptyBack() { toast(WEAP[G.weapon].name + " EMPTY · BACK TO BLASTER", 
 
 // Aim assist: nudge the shot toward a bot that's very close to the crosshair (bigger on phones / Easy).
 function assistDir(o, d) {
-  let cone = DIFFS[G.diff].assist + (isTouchPlay() ? 0.035 : 0);
+  let cone = DIFFS[G.diff].assist + (isTouchPlay() ? 0.035 : 0) + (STORE.assist ? 0.12 : 0);
   let best = null, bestA = cone;
   for (const e of enemies) {
     if (e.hp <= 0 || e.dormant) continue;
@@ -1684,6 +1695,7 @@ function killFx(e) {
 // gun muzzle in world space (for beams)
 function gunTip(o) {
   const f = forward(), rx = Math.cos(P.yaw), rz = Math.sin(P.yaw);
+  if (cam3On()) return [P.x + f.x * 1.2 + rx * 0.34, P.y + 1.0 + f.y * 1.2, P.z + f.z * 1.2 + rz * 0.34]; // the avatar's gun
   return [o.x + f.x * 0.45 + rx * 0.22, o.y + f.y * 0.45 - 0.22, o.z + f.z * 0.45 + rz * 0.22];
 }
 function addBeam(a, h, c, t, w) { beams.push({ o: a, h, c, t, t0: t, w }); }
@@ -1691,7 +1703,7 @@ function addBeam(a, h, c, t, w) { beams.push({ o: a, h, c, t, t0: t, w }); }
 function shoot() {
   if (G.mode !== "play" || NET.down || NET.menu) return;
   const o = eyePos();
-  const d0 = forward();
+  const d0 = aimFwd(); // forward(), or the 3rd-person crosshair ray
   o.x += d0.x * 0.2; o.y += d0.y * 0.2; o.z += d0.z * 0.2;
   const w = G.weapon;
   if (w !== 0 && wAmmo(w) <= 0) { emptyBack(); updateHUD(); return; }
@@ -1747,6 +1759,7 @@ function shoot() {
     updateHUD();
     return;
   }
+  if (w >= 5) { ratShoot(w, o, d0); return; } // Ratita Industries weapons
   if (G.reload > 0) return;
   if (G.ammo <= 0) { tryReload(); return; }
   G.ammo--;
@@ -1767,6 +1780,7 @@ function updateRockets(dt) {
     if (r.dead) continue;
     r.life -= dt;
     for (let i = 0; i < 3 && !r.dead; i++) {
+      if (r.cheese) r.vy -= 10 * dt / 3; // cheese wheels arc
       r.x += r.vx * dt / 3; r.y += r.vy * dt / 3; r.z += r.vz * dt / 3;
       if (world.solid(r.x, r.y, r.z) || r.life <= 0) { rocketHit(r); break; }
       if (r.mine) for (const e of enemies) {
@@ -1775,12 +1789,13 @@ function updateRockets(dt) {
         if (r.x > b[0] - 0.15 && r.x < b[3] + 0.15 && r.y > b[1] - 0.15 && r.y < b[4] + 0.15 && r.z > b[2] - 0.15 && r.z < b[5] + 0.15) { r.direct = e; rocketHit(r); break; }
       }
     }
-    if (!r.dead) parts.push({ x: r.x, y: r.y, z: r.z, vx: (Math.random() - 0.5), vy: 1.2, vz: (Math.random() - 0.5), life: 0.35, col: Math.random() < 0.5 ? [1, 0.6, 0.15] : [0.6, 0.6, 0.65], s: 0.12 });
+    if (!r.dead && !r.cheese) parts.push({ x: r.x, y: r.y, z: r.z, vx: (Math.random() - 0.5), vy: 1.2, vz: (Math.random() - 0.5), life: 0.35, col: Math.random() < 0.5 ? [1, 0.6, 0.15] : [0.6, 0.6, 0.65], s: 0.12 });
   }
   rockets = rockets.filter(r => !r.dead);
 }
 function rocketHit(r) {
   r.dead = true;
+  if (r.cheese) { ratCheeseHit(r); return; }
   if (!r.mine) return; // a partner's rocket: their "boom" message brings the explosion
   const p = [nr2(r.x - r.vx * 0.012), nr2(r.y - r.vy * 0.012), nr2(r.z - r.vz * 0.012)];
   applyBoom(p[0], p[1], p[2]);
@@ -2141,7 +2156,7 @@ function updatePickups(dt) {
     if (!p.alive) continue;
     p.t += dt;
     if (Math.hypot(p.x - P.x, p.z - P.z) < 1.25 && Math.abs(p.y - (P.y + 0.8)) < 1.3) {
-      if (p.kind === "health" && G.hp >= MAX_HP) continue; // leave it for later
+      if (p.kind === "health" && G.hp >= maxHp()) continue; // leave it for later
       if (NET.on && !netClaimPickup(p)) continue; // co-op: the host hands out each pickup once
       applyPickup(p);
     }
@@ -2157,13 +2172,13 @@ function applyPickup(p) {
       if (p.kind === "ammo") {
         const n = p.small ? Math.ceil(Dd.ammoPick / 2) : Dd.ammoPick;
         G.reserve += n; G.score += 25; toast("+" + n + " AMMO", "#ffd23f");
-        if (!p.small) for (const [i, k] of [[2, 6], [3, 1], [4, 20]]) if (wOwned(i)) G[WEAP[i].key] = Math.min(WEAP[i].max, (G[WEAP[i].key] | 0) + k);
+        if (!p.small) for (const [i, k] of [[2, 6], [3, 1], [4, 20], [5, 2], [6, 6], [7, 20]]) if (wOwned(i)) G[WEAP[i].key] = Math.min(WEAP[i].max, (G[WEAP[i].key] | 0) + k);
       } else if (p.kind === "health") {
         const n = p.small ? 25 : 45;
-        G.hp = Math.min(MAX_HP, G.hp + n); col = [0.3, 1, 0.4]; toast("+" + n + " HEALTH", "#7dff5a");
+        G.hp = Math.min(maxHp(), G.hp + n); col = [0.3, 1, 0.4]; toast("+" + n + " HEALTH", "#7dff5a");
       } else if (p.kind === "heart") {
         if (G.lives < MAX_LIVES) { G.lives++; toast("+1 LIFE", "#ff3d6e"); } else { G.score += 200; toast("+200 (LIVES FULL)", "#ff3d6e"); }
-        G.hp = MAX_HP; col = [1, 0.2, 0.4];
+        G.hp = maxHp(); col = [1, 0.2, 0.4];
       } else if (WPICK[p.kind]) {
         const wi = WPICK[p.kind], WW = WEAP[wi];
         G[WW.key] = Math.min(WW.max, (G[WW.key] | 0) + WW.pick); col = WW.col;
@@ -2199,8 +2214,9 @@ function activateCp(r) {
       G.cp = r.cp;
       G.maxRoom = Math.max(G.maxRoom, r.idx);
       // a small top-up for reaching new ground
-      G.hp = Math.min(MAX_HP, G.hp + DIFFS[G.diff].cpHeal);
+      G.hp = Math.min(maxHp(), G.hp + DIFFS[G.diff].cpHeal);
       if (G.ammo + G.reserve < MAG * 2) G.reserve += 6;
+      ratRefill(0.5);
       sfx("pickup");
       toast("CHECKPOINT · " + (r.spec && r.spec.name ? r.spec.name : "ROOM " + r.idx + "/" + Math.max(1, rooms.length - 2)), "#7dff5a");
       if (r.boss && G.mode === "play") setTimeout(() => { if (G.mode === "play" && bossAlive()) toast("BOSS: THE OVERSEER", "#ff5ad9"); }, 1400);
@@ -2245,7 +2261,7 @@ function updatePlayer(dt) {
   if (P.y < -4) {
     if (!(NET.on && netRespawnNearPartner())) respawnAtCheckpoint();
     G.invuln = 0;
-    hurtPlayer(DMG.fall / DIFFS[G.diff].dmg);
+    if (!STORE.assist) hurtPlayer(DMG.fall / DIFFS[G.diff].dmg); // Assist Mode: no fall damage
     G.invuln = 1.0;
   }
   const pad = extract;
@@ -2491,13 +2507,14 @@ function drawGun(proj) {
     gbox(-0.07, 0.15, -0.2, 0.14, 0.14, 0.22, [0.45,0.9,1], 0.6);
     gbox(-0.05, 0.05, -0.68, 0.1, 0.1, 0.38, [0.35,0.4,0.5], 0);
     gbox(-0.06, 0.04, -0.72, 0.12, 0.12, 0.05, [0.6,0.95,1], 0.9);
+  } else if (w >= 5) { ratGun(w, gbox);
   } else {
     gbox(-0.07, 0.04, -0.22, 0.14, 0.12, 0.46, [0.18,0.2,0.26], 0); // body
     gbox(-0.04, 0.08, -0.52, 0.08, 0.08, 0.32, [0.35,0.38,0.45], 0); // barrel
     gbox(-0.03, 0.16, -0.10, 0.06, 0.06, 0.10, [0.1,0.9,1], 0.6); // sight
     gbox(-0.05, -0.02, -0.08, 0.10, 0.10, 0.16, [1.0,0.5,0.12], 0); // mag
   }
-  if (G.muzzle > 0) gbox(-0.06, 0.06, w === 2 ? -1.0 : w === 3 ? -0.86 : -0.82, 0.12, 0.12, 0.12, w === 2 ? [1,0.4,0.85] : [1,0.9,0.4], 1);
+  if (G.muzzle > 0 && w !== 7) gbox(-0.06, 0.06, w === 2 ? -1.0 : w === 3 ? -0.86 : w === 5 ? -1.04 : -0.82, 0.12, 0.12, 0.12, w === 2 ? [1,0.4,0.85] : [1,0.9,0.4], 1);
 }
 
 function drawMinimap() {
@@ -2624,8 +2641,8 @@ function frame(now) {
     if (NET.down) netDownTick(dt); else updatePlayer(dt);
     updateCheckpoints();
     // health regen after a short break from taking damage
-    if (G.regenT > 0) G.regenT -= dt;
-    else if (G.hp < MAX_HP && !NET.down) { G.hp = Math.min(MAX_HP, G.hp + DIFFS[G.diff].regenRate * dt); updateHpBar(); }
+    if (G.regenT > 0) G.regenT -= dt * (STORE.assist ? 2 : 1);
+    else if (G.hp < maxHp() && !NET.down) { G.hp = Math.min(maxHp(), G.hp + DIFFS[G.diff].regenRate * (STORE.assist ? 1.6 : 1) * dt); updateHpBar(); }
     // never soft-lock on ammo: a trickle of emergency rounds when completely dry
     if (G.ammo === 0 && G.reserve === 0 && G.reload <= 0 && G.weapon === 0) {
       G.emergencyT += dt;
@@ -2636,6 +2653,7 @@ function frame(now) {
     updateRockets(dt);
     updateWaves(dt);
     updatePickups(dt);
+    ratUpdate(dt);
     G.shotCd = Math.max(0, G.shotCd - dt);
     if (shooting && G.shotCd <= 0) shoot();
   } else {
@@ -2660,9 +2678,13 @@ function frame(now) {
   if (G.mode === "play") {
     const shx = (Math.random() - 0.5) * G.shake * 0.12;
     const shy = (Math.random() - 0.5) * G.shake * 0.12;
-    camX = P.x + shx; camY = P.y + P.eye + shy; camZ = P.z;
-    const f = forward();
-    view = lookAt(camX, camY, camZ, camX + f.x, camY + f.y, camZ + f.z, 0, 1, 0);
+    if (cam3On()) { const c3 = cam3View(shx, shy); camX = c3.x; camY = c3.y; camZ = c3.z; view = c3.view; }
+    else {
+      CAM3 = null;
+      camX = P.x + shx; camY = P.y + P.eye + shy; camZ = P.z;
+      const f = forward();
+      view = lookAt(camX, camY, camZ, camX + f.x, camY + f.y, camZ + f.z, 0, 1, 0);
+    }
   } else {
     const t = G.time * 0.22;
     camX = 26 + Math.sin(t) * 16;
@@ -2683,9 +2705,11 @@ function frame(now) {
 
   for (const e of enemies) if (e.hp > 0) drawEnemy(e, vp);
   if (NET.on) netDraw(vp);
+  ratDraw(vp);
   drawCheckpoints(vp);
   for (const b of bolts) { const big = b.c === 4 ? 0.36 : 0.26; drawCube(b.x - big / 2, b.y - big / 2, b.z - big / 2, big, big, big, BOLT_COL[b.c || 0], 1, vp); }
   for (const r of rockets) {
+    if (r.cheese) { ratDrawCheese(r, vp); continue; }
     const L = Math.hypot(r.vx, r.vy, r.vz) || 1;
     drawCube(r.x - 0.11, r.y - 0.11, r.z - 0.11, 0.22, 0.22, 0.22, [0.45, 0.9, 0.3], 0.5, vp);
     drawCube(r.x - r.vx / L * 0.25 - 0.09, r.y - r.vy / L * 0.25 - 0.09, r.z - r.vz / L * 0.25 - 0.09, 0.18, 0.18, 0.18, [1, 0.6, 0.15], 1, vp);
@@ -2711,7 +2735,7 @@ function frame(now) {
 
   if (G.mode === "play") {
     gl.clear(gl.DEPTH_BUFFER_BIT);
-    if (!NET.down) drawGun(proj);
+    if (!NET.down && !cam3On()) drawGun(proj);
     drawMinimap();
   }
   if (NET.on) netFrame(dt, vp);
@@ -2723,7 +2747,7 @@ window.addEventListener("keydown", e => {
   keys[e.key] = true;
   if (e.code === "KeyR") tryReload();
   if (e.code === "KeyQ") switchWeapon();
-  for (let i = 0; i < 5; i++) if (e.code === "Digit" + (i + 1)) switchWeapon(i);
+  for (let i = 0; i < WEAP.length; i++) if (e.code === "Digit" + (i + 1)) switchWeapon(i);
   if (e.code === "Space") e.preventDefault();
   if (e.code === "KeyP" && G.mode === "title") startRun();
 });
@@ -2908,6 +2932,363 @@ document.addEventListener("pointerlockchange", () => {
   });
 })();
 
+// =====================================================================
+// RATITA INDUSTRIES ITEM PACK (Mini Pack DLC, Suggestion Booth #19) + FREE 3RD-PERSON CAMERA + FREE ASSIST MODE
+// Paid part is gated by localStorage 'grokDLC.voxels.ratita_industries_item_pack' (set by the Grok Arcade
+// DLC Shop, same origin). It unlocks live (no reload) and in co-op the host's copy is shared with guests.
+// Ratita Industries is the company of Luna, Pi-rat (one eye) and Snowie, three very smart rats.
+// FREE for everyone: 3rd-person camera (V / CAM button / title) and Assist Mode (title).
+// =====================================================================
+const RAT_KEY = "grokDLC.voxels.ratita_industries_item_pack";
+const ARCADE_URL = "https://lizethbran13-cmyk.github.io/grok-arcade/";
+let ratWas = null;
+function ratOwnLocal() {
+  try {
+    if (localStorage.getItem(RAT_KEY)) return true;
+    const all = JSON.parse(localStorage.getItem("grokDLC.owned") || "[]");
+    return Array.isArray(all) && all.indexOf(RAT_KEY) >= 0;
+  } catch (e) { return false; }
+}
+function ratOwned() { return ratOwnLocal() || (NET.on && !NET.host && !!NET.hostRat); }
+// skins: index 0 is free (your co-op colour), the rest come with the pack
+const SKINS = [
+  { id: "classic", name: "CLASSIC", free: true },
+  { id: "luna", name: "LUNA LAB COAT", body: [0.96, 0.96, 1.0], trim: [0.62, 0.36, 1.0], pants: [0.42, 0.24, 0.72], head: [0.66, 0.64, 0.72], visor: [0.75, 0.5, 1.0], ear: [0.66, 0.64, 0.72], tail: true, extra: "goggles" },
+  { id: "pirat", name: "PI-RAT CAPTAIN", body: [0.14, 0.13, 0.17], trim: [0.95, 0.15, 0.2], pants: [0.3, 0.2, 0.14], head: [0.55, 0.47, 0.42], visor: [1.0, 0.85, 0.2], ear: [0.55, 0.47, 0.42], tail: true, extra: "pirate" },
+  { id: "snowie", name: "SNOWIE FROST SUIT", body: [0.62, 0.88, 1.0], trim: [1.0, 1.0, 1.0], pants: [0.35, 0.6, 0.9], head: [0.98, 0.98, 1.0], visor: [0.4, 0.95, 1.0], ear: [0.98, 0.98, 1.0], tail: true, extra: "scarf" },
+  { id: "ceo", name: "RATITA CEO", body: [0.2, 0.18, 0.3], trim: [1.0, 0.82, 0.2], pants: [0.16, 0.15, 0.22], head: [0.72, 0.7, 0.74], visor: [1.0, 0.82, 0.2], ear: [0.72, 0.7, 0.74], tail: true, extra: "tophat" },
+  { id: "robo", name: "ROBO-RAT MK1", body: [0.75, 0.78, 0.85], trim: [0.1, 0.95, 1.0], pants: [0.35, 0.38, 0.45], head: [0.82, 0.85, 0.9], visor: [0.1, 0.95, 1.0], ear: [0.6, 0.63, 0.7], tail: true, extra: "antenna", glow: true },
+];
+const GADGETS = [
+  { id: "buddy", name: "ROBO-RAT BUDDY", icon: "🐀", cd: 26, desc: "a tiny Ratita drone that zaps bots for 15 s" },
+  { id: "shield", name: "BUBBLE SHIELD", icon: "🫧", cd: 18, desc: "blocks all damage for 5 s" },
+  { id: "jet", name: "JET TAIL", icon: "🚀", cd: 5, desc: "rocket hop up and forward" },
+];
+function ratSkinIdx() { const i = SKINS.findIndex(s => s.id === STORE.skin); return i > 0 && ratOwned() ? i : 0; }
+function skinFor(idx, rgb) {
+  const S = SKINS[idx | 0];
+  if (S && !S.free) return S;
+  const c = rgb || [0.1, 0.88, 1.0];
+  return { body: c, trim: [1, 1, 1], pants: [c[0] * 0.45, c[1] * 0.45, c[2] * 0.45], head: [0.95, 0.85, 0.75], visor: c, classic: true };
+}
+function cam3On() { return !!STORE.cam3 && G.mode === "play" && !NET.down; }
+let CAM3 = null;
+// 3rd person: shots still leave from your eye, aimed at whatever is under the crosshair
+function aimFwd() {
+  const f = forward();
+  if (!cam3On() || !CAM3) return f;
+  const o = { x: CAM3.x, y: CAM3.y, z: CAM3.z };
+  const vh = traceVoxels(o, f, 70); let T = vh ? vh.t : 70;
+  for (const e of enemies) {
+    if (e.hp <= 0 || e.dormant) continue;
+    const b = enemyBox(e); const t = rayAABB(o, f, b[0], b[1], b[2], b[3], b[4], b[5], T);
+    if (t !== null && t < T) T = t;
+  }
+  const ep = eyePos();
+  const tx = o.x + f.x * T - ep.x, ty = o.y + f.y * T - ep.y, tz = o.z + f.z * T - ep.z, L = Math.hypot(tx, ty, tz) || 1;
+  if (L < 0.8) return f;
+  return { x: tx / L, y: ty / L, z: tz / L };
+}
+function cam3View(shx, shy) {
+  const f = forward(), rx = Math.cos(P.yaw), rz = Math.sin(P.yaw);
+  const e = { x: P.x, y: P.y + P.eye + 0.12, z: P.z };
+  let dx = -f.x * 3.3 + rx * 0.72, dy = -f.y * 3.3 + 0.55, dz = -f.z * 3.3 + rz * 0.72;
+  const L = Math.hypot(dx, dy, dz); dx /= L; dy /= L; dz /= L;
+  const hit = traceVoxels(e, { x: dx, y: dy, z: dz }, L);
+  const dist = hit ? Math.max(0.3, hit.t - 0.3) : L;
+  const x = e.x + dx * dist + shx, y = e.y + dy * dist + shy, z = e.z + dz * dist;
+  CAM3 = { x, y, z, dist };
+  return { x, y, z, view: lookAt(x, y, z, x + f.x, y + f.y, z + f.z, 0, 1, 0) };
+}
+function drawBoxR(ox, oy, oz, yaw, lx, ly, lz, sx, sy, sz, col, emit, vp) {
+  const model = m4mul(m4trans(ox, oy, oz), m4mul(m4rotY(-yaw), cubeModel(lx, ly, lz, sx, sy, sz)));
+  drawMesh(unitMesh, model, m4mul(vp, model), col, emit || 0);
+}
+// the player figure (you in 3rd person, partners in co-op). Local axes: +x right, -z forward.
+function drawAvatar(x, y, z, yaw, S, walk, vp, gunCol) {
+  const b = (lx, ly, lz, sx, sy, sz, c, em) => drawBoxR(x, y, z, yaw, lx, ly, lz, sx, sy, sz, c, em, vp);
+  const g = S.glow ? 0.35 : 0;
+  b(-0.24, 0, -0.1 + walk, 0.2, 0.7, 0.2, S.pants);
+  b(0.04, 0, -0.1 - walk, 0.2, 0.7, 0.2, S.pants);
+  b(-0.3, 0.7, -0.2, 0.6, 0.62, 0.4, S.body, S.classic ? 0.18 : g * 0.3);
+  b(-0.31, 0.9, -0.21, 0.62, 0.1, 0.42, S.trim, 0.3);
+  b(-0.44, 0.78 , -0.12 - walk * 0.6, 0.14, 0.5, 0.22, S.body);
+  b(0.3, 0.98, -0.52, 0.14, 0.14, 0.42, S.body);
+  b(-0.21, 1.32, -0.21, 0.42, 0.4, 0.42, S.head, 0.05);
+  b(-0.19, 1.44, -0.25, 0.38, 0.12, 0.06, S.visor, 0.6);
+  b(0.28, 0.94, -1.0, 0.13, 0.13, 0.52, gunCol || [0.22, 0.24, 0.3]);
+  if (S.classic) return;
+  // rat ears (pink inside) + tail
+  for (const sx of [-0.27, 0.11]) { b(sx, 1.64, -0.06, 0.16, 0.16, 0.06, S.ear); b(sx + 0.04, 1.68, -0.075, 0.08, 0.08, 0.02, [1, 0.62, 0.72], 0.2); }
+  b(-0.05, 1.4, -0.29, 0.1, 0.08, 0.06, [1, 0.6, 0.7], 0.3); // nose
+  if (S.tail) { b(-0.04, 0.72, 0.2, 0.08, 0.08, 0.32, [1, 0.68, 0.74]); b(-0.035, 0.62, 0.5, 0.07, 0.07, 0.26, [1, 0.68, 0.74]); }
+  if (S.extra === "pirate") { b(0.0, 1.43, -0.27, 0.18, 0.16, 0.04, [0.04, 0.04, 0.05]); b(-0.23, 1.6, -0.23, 0.46, 0.1, 0.46, [0.85, 0.1, 0.15]); }
+  else if (S.extra === "goggles") { b(-0.17, 1.44, -0.28, 0.14, 0.12, 0.04, [0.8, 0.6, 1], 0.7); b(0.03, 1.44, -0.28, 0.14, 0.12, 0.04, [0.8, 0.6, 1], 0.7); }
+  else if (S.extra === "scarf") { b(-0.25, 1.24, -0.25, 0.5, 0.12, 0.5, [0.4, 0.85, 1], 0.2); b(0.12, 0.95, -0.27, 0.12, 0.3, 0.06, [0.4, 0.85, 1], 0.2); }
+  else if (S.extra === "tophat") { b(-0.24, 1.72, -0.24, 0.48, 0.05, 0.48, [0.08, 0.08, 0.1]); b(-0.16, 1.77, -0.16, 0.32, 0.3, 0.32, [0.08, 0.08, 0.1]); b(-0.165, 1.8, -0.165, 0.33, 0.06, 0.33, S.trim, 0.4); }
+  else if (S.extra === "antenna") { b(-0.03, 1.72, -0.03, 0.06, 0.26, 0.06, [0.5, 0.52, 0.6]); b(-0.06, 1.98, -0.06, 0.12, 0.12, 0.12, [0.1, 0.95, 1], 1); }
+}
+// ---------- weapons (indices 5-7 in WEAP) ----------
+function ratGun(w, gbox) {
+  if (w === 5) { // CHEESE CANNON: a chunky cheese wedge barrel with holes
+    gbox(-0.1, 0.0, -0.62, 0.2, 0.18, 0.7, [1, 0.8, 0.18], 0.15);
+    gbox(-0.105, 0.05, -0.5, 0.05, 0.05, 0.05, [0.75, 0.55, 0.08], 0); gbox(0.05, 0.1, -0.75, 0.06, 0.05, 0.06, [0.75, 0.55, 0.08], 0);
+    gbox(-0.07, 0.15, -0.35, 0.05, 0.04, 0.05, [0.75, 0.55, 0.08], 0);
+    gbox(-0.08, 0.02, -0.98, 0.16, 0.14, 0.06, [0.3, 0.3, 0.36], 0);
+    gbox(-0.06, 0.18, -0.2, 0.12, 0.08, 0.16, [0.6, 0.36, 1], 0.4); // Luna purple sight
+  } else if (w === 6) { // SQUEAK ZAPPER: coil + little rat-ear antennas
+    gbox(-0.07, 0.03, -0.3, 0.14, 0.13, 0.5, [0.25, 0.28, 0.4], 0);
+    for (let i = 0; i < 4; i++) gbox(-0.06, 0.04, -0.4 - i * 0.1, 0.12, 0.11, 0.04, [0.55, 0.8, 1], 0.9);
+    gbox(-0.03, 0.06, -0.86, 0.06, 0.06, 0.3, [0.6, 0.62, 0.7], 0);
+    gbox(-0.08, 0.17, -0.22, 0.05, 0.07, 0.03, [0.55, 0.5, 0.48], 0); gbox(0.03, 0.17, -0.22, 0.05, 0.07, 0.03, [0.55, 0.5, 0.48], 0);
+    gbox(-0.02, 0.15, -0.12, 0.04, 0.04, 0.04, [0.95, 0.15, 0.2], 0.8); // Pi-rat's one red eye
+  } else { // SNOWIE SPRAYER: snowball hopper + frosty nozzle
+    gbox(-0.08, 0.02, -0.3, 0.16, 0.14, 0.5, [0.92, 0.97, 1], 0.1);
+    gbox(-0.07, 0.16, -0.32, 0.14, 0.16, 0.18, [0.62, 0.88, 1], 0.5);
+    gbox(-0.05, 0.05, -0.7, 0.1, 0.1, 0.4, [0.5, 0.75, 0.95], 0);
+    gbox(-0.06, 0.04, -0.74, 0.12, 0.12, 0.05, [1, 1, 1], 0.9);
+  }
+}
+function ratShoot(w, o, d0) {
+  if (w === 5) { // CHEESE CANNON: lobbed cheese wheel, gooey splash, no craters
+    G.cheese--; G.muzzle = 0.1; G.recoil = 0.36; G.shotCd = 0.8; G.shake = Math.max(G.shake, 0.18);
+    blip(180, 0.16, "triangle", 0.08, 60);
+    const d = assistDir(o, d0), g = gunTip(o), S = 18;
+    rockets.push({ x: g[0], y: g[1], z: g[2], vx: d.x * S, vy: d.y * S + 2.4, vz: d.z * S, life: 2.5, mine: true, cheese: true });
+    if (NET.on) netEvent({ t: "rk", o: g.map(nr2), v: [nr2(d.x * S), nr2(d.y * S + 2.4), nr2(d.z * S)], ch: 1 });
+    if (G.cheese <= 0) emptyBack();
+  } else if (w === 6) { // SQUEAK ZAPPER: chain lightning that hops to 3 more bots
+    G.zap--; G.muzzle = 0.06; G.recoil = 0.14; G.shotCd = 0.42; G.shake = Math.max(G.shake, 0.08);
+    blip(1800, 0.06, "square", 0.04, 2600); setTimeout(() => blip(2400, 0.05, "square", 0.03, 3200), 50);
+    const first = fireRay(o, assistDir(o, d0), 2);
+    const pts = [gunTip(o), (NET.lastHit || [o.x, o.y, o.z]).slice()], seen = new Set();
+    let cur = first;
+    if (cur) seen.add(cur);
+    for (let k = 0; k < 3 && cur; k++) {
+      let nb = null, nd = 6.5;
+      for (const e of enemies) {
+        if (e.hp <= 0 || e.dormant || seen.has(e)) continue;
+        const dd = Math.hypot(e.x - cur.x, ctrY(e) - ctrY(cur), e.z - cur.z);
+        if (dd < nd && los(cur.x, ctrY(cur), cur.z, e.x, ctrY(e), e.z)) { nd = dd; nb = e; }
+      }
+      if (!nb) break;
+      seen.add(nb); pts.push([nb.x, ctrY(nb), nb.z]);
+      damageEnemy(nb, 1.5, nb.x, ctrY(nb), nb.z);
+      cur = nb;
+    }
+    for (let i = 0; i + 1 < pts.length; i++) addBeam(pts[i], pts[i + 1], [0.55, 0.8, 1], 0.16, 0.07);
+    if (NET.on) netEvent({ t: "s", o: pts[0].map(nr2), h: pts[1].map(nr2), w: 6, c: pts.slice(2).map(p => p.map(nr2)) });
+    if (G.zap <= 0) emptyBack();
+  } else { // SNOWIE SPRAYER: rapid snowballs that chill and freeze bots
+    G.snow--; G.shotCd = 0.11; G.recoil = Math.max(G.recoil, 0.06); G.muzzle = 0.04;
+    if (!G.snowSnd || G.time - G.snowSnd > 0.15) { blip(900, 0.05, "triangle", 0.03, 500); G.snowSnd = G.time; }
+    const d = assistDir(o, d0), s = 0.025;
+    const pd = { x: d.x + (Math.random() - 0.5) * s, y: d.y + (Math.random() - 0.5) * s, z: d.z + (Math.random() - 0.5) * s };
+    const L = Math.hypot(pd.x, pd.y, pd.z); pd.x /= L; pd.y /= L; pd.z /= L;
+    const hitE = fireRay(o, pd, 0.6);
+    if (hitE) { if (NET.on && !NET.host) { netSend({ t: "frz", id: hitE.id }); hitE.frost = (hitE.frost || 0) + 1; } else applyFrost(hitE); }
+    ratSnowFx(gunTip(o), pd);
+    if (NET.on && (G.snowNet = (G.snowNet || 0) + 1) % 2 === 0) netShot(o, 7);
+    if (G.snow <= 0) emptyBack();
+  }
+  updateHUD();
+}
+function ratSnowFx(g, d) {
+  for (let i = 0; i < 2; i++) parts.push({ x: g[0], y: g[1], z: g[2], vx: d.x * (16 + i * 3), vy: d.y * 16 + 2, vz: d.z * (16 + i * 3), life: 0.45, col: [0.95, 0.98, 1], s: 0.14 });
+}
+function ratCheeseFx(p) {
+  burst(p[0], p[1], p[2], [1, 0.82, 0.2], 18, 5); burst(p[0], p[1], p[2], [1, 0.95, 0.6], 8, 3);
+  if (Math.hypot(p[0] - P.x, p[2] - P.z) < 30) blip(120, 0.25, "sine", 0.09, 40);
+}
+function ratCheeseHit(r) {
+  const p = [nr2(r.x - r.vx * 0.012), nr2(r.y - r.vy * 0.012), nr2(r.z - r.vz * 0.012)];
+  ratCheeseFx(p);
+  if (!r.mine) return;
+  if (NET.on) netEvent({ t: "chz", p });
+  for (const e of enemies) {
+    if (e.hp <= 0 || e.dormant) continue;
+    const d = Math.hypot(e.x - p[0], ctrY(e) - p[1], e.z - p[2]) - EN[e.kind].box[0] * 0.5;
+    if (d > 2.6) continue;
+    damageEnemy(e, Math.max(1, Math.round(4 * (1 - Math.max(0, d) / 2.6))) + (r.direct === e ? 2 : 0), e.x, ctrY(e), e.z);
+  }
+}
+function ratDrawCheese(r, vp) {
+  const s = Math.sin(G.time * 14) * 0.03;
+  drawCube(r.x - 0.17, r.y - 0.12 + s, r.z - 0.17, 0.34, 0.24, 0.34, [1, 0.8, 0.18], 0.4, vp);
+  drawCube(r.x - 0.05, r.y + 0.1 + s, r.z - 0.05, 0.1, 0.04, 0.1, [0.78, 0.55, 0.08], 0, vp);
+}
+function ratRemoteShot(d, near) {
+  if (d.w === 6) {
+    const pts = [d.o, d.h].concat(d.c || []);
+    for (let i = 0; i + 1 < pts.length; i++) addBeam(pts[i], pts[i + 1], [0.55, 0.8, 1], 0.16, 0.07);
+    if (near) blip(1800, 0.05, "square", 0.02, 2600);
+  } else if (d.w === 7) {
+    const dx = d.h[0] - d.o[0], dy = d.h[1] - d.o[1], dz = d.h[2] - d.o[2], L = Math.hypot(dx, dy, dz) || 1;
+    ratSnowFx(d.o, { x: dx / L, y: dy / L, z: dz / L });
+  }
+}
+function ratStartRun() {
+  const own = ratOwned();
+  for (const i of [5, 6, 7]) G.got[i] = own;
+  G.cheese = own ? 8 : 0; G.zap = own ? 24 : 0; G.snow = own ? 60 : 0;
+  G.gcd = [0, 0, 0]; G.shieldT = 0; G.buddy = null; if (typeof G.gad !== "number") G.gad = 0;
+  if (STORE.assist) G.reserve += 24;
+  G.hp = maxHp();
+  ratHud(true);
+}
+function ratRefill(k) { if (!ratOwned()) return; G.cheese = Math.min(WEAP[5].max, (G.cheese | 0) + Math.round(2 * k)); G.zap = Math.min(WEAP[6].max, (G.zap | 0) + Math.round(6 * k)); G.snow = Math.min(WEAP[7].max, (G.snow | 0) + Math.round(20 * k)); }
+// ---------- gadgets ----------
+function ratGadget() {
+  if (G.mode !== "play" || NET.down) return;
+  if (!ratOwned()) { toast("🔒 GADGETS COME WITH THE RATITA INDUSTRIES ITEM PACK", "#ffd23f"); return; }
+  const i = G.gad | 0, GD = GADGETS[i];
+  if (G.gcd[i] > 0) { toast(GD.name + " RECHARGING · " + Math.ceil(G.gcd[i]) + "s", "#9fc3dc"); return; }
+  G.gcd[i] = GD.cd;
+  const f = forward();
+  if (GD.id === "buddy") { G.buddy = { t: 15, x: P.x, y: P.y + 2, z: P.z, cd: 0.5, a: 0 }; toast("🐀 ROBO-RAT BUDDY DEPLOYED! SQUEAK!", "#9fe8ff"); blip(1200, 0.08, "square", 0.05, 1800); }
+  else if (GD.id === "shield") { G.shieldT = 5; toast("🫧 BUBBLE SHIELD UP!", "#7fd8ff"); blip(500, 0.3, "sine", 0.07, 900); }
+  else { const fl = Math.hypot(f.x, f.z) || 1; P.vy = 12; P.vx += f.x / fl * 8; P.vz += f.z / fl * 8; P.grounded = false; sfx("jump"); for (let k = 0; k < 14; k++) parts.push({ x: P.x, y: P.y + 0.4, z: P.z, vx: (Math.random() - 0.5) * 3, vy: -4 - Math.random() * 3, vz: (Math.random() - 0.5) * 3, life: 0.5, col: Math.random() < 0.5 ? [1, 0.6, 0.1] : [1, 0.9, 0.3], s: 0.16 }); }
+  ratHud(true);
+}
+function ratCycleGadget() { if (!ratOwned()) { ratGadget(); return; } G.gad = ((G.gad | 0) + 1) % GADGETS.length; toast(GADGETS[G.gad].icon + " " + GADGETS[G.gad].name + ": " + GADGETS[G.gad].desc, "#ffd23f"); ratHud(true); }
+function ratShieldPing() { G.hurtFlash = 0; blip(1400, 0.06, "sine", 0.04, 800); burst(P.x, P.y + 1, P.z, [0.5, 0.85, 1], 4, 3); }
+function ratUpdate(dt) {
+  if (!G.gcd) return;
+  for (let i = 0; i < G.gcd.length; i++) G.gcd[i] = Math.max(0, G.gcd[i] - dt);
+  if (G.shieldT > 0) G.shieldT = Math.max(0, G.shieldT - dt);
+  const bd = G.buddy;
+  if (bd) {
+    bd.t -= dt; bd.a += dt * 2.4;
+    const tx = P.x + Math.cos(bd.a) * 1.2, ty = P.y + 2.1 + Math.sin(G.time * 3) * 0.15, tz = P.z + Math.sin(bd.a) * 1.2;
+    const k = Math.min(1, dt * 6); bd.x += (tx - bd.x) * k; bd.y += (ty - bd.y) * k; bd.z += (tz - bd.z) * k;
+    bd.cd -= dt;
+    if (bd.cd <= 0) {
+      bd.cd = 0.55;
+      let best = null, bdist = 16;
+      for (const e of enemies) {
+        if (e.hp <= 0 || e.dormant) continue;
+        const dd = Math.hypot(e.x - bd.x, e.z - bd.z);
+        if (dd < bdist && los(bd.x, bd.y, bd.z, e.x, ctrY(e), e.z)) { bdist = dd; best = e; }
+      }
+      if (best) {
+        const h = [best.x, ctrY(best), best.z];
+        damageEnemy(best, 1, h[0], h[1], h[2]);
+        addBeam([bd.x, bd.y, bd.z], h, [0.6, 0.95, 1], 0.12, 0.06);
+        blip(2000, 0.04, "square", 0.025, 2600);
+        if (NET.on) netEvent({ t: "s", o: [nr2(bd.x), nr2(bd.y), nr2(bd.z)], h: h.map(nr2), w: 6 });
+      }
+    }
+    if (bd.t <= 0) { G.buddy = null; toast("ROBO-RAT BUDDY WENT HOME FOR CHEESE", "#9fc3dc"); }
+  }
+  document.body.classList.toggle("shield-on", G.shieldT > 0);
+  ratHud(false);
+}
+function ratDraw(vp) {
+  if (G.mode !== "play") return;
+  if (cam3On() && CAM3 && CAM3.dist > 0.9) {
+    const sp = Math.hypot(P.vx, P.vz), walk = P.grounded && sp > 0.5 ? Math.sin(G.time * 12) * 0.12 : 0;
+    drawAvatar(P.x, P.y, P.z, P.yaw, skinFor(ratSkinIdx(), NET.on && NET.prm ? hexRgb(NET.prm.color) : null), walk, vp, WEAP[G.weapon].col);
+    if (G.muzzle > 0) { const f = forward(), rx = Math.cos(P.yaw), rz = Math.sin(P.yaw); drawCube(P.x + f.x * 1.15 + rx * 0.33 - 0.09, P.y + 1.0, P.z + f.z * 1.15 + rz * 0.33 - 0.09, 0.18, 0.18, 0.18, [1, 0.9, 0.4], 1, vp); }
+  }
+  if (G.shieldT > 0 && cam3On()) {
+    const n = 14;
+    for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2 + G.time * 1.5, yy = P.y + 0.9 + Math.sin(a * 2 + G.time * 3) * 0.6; drawCube(P.x + Math.cos(a) * 0.85 - 0.07, yy, P.z + Math.sin(a) * 0.85 - 0.07, 0.14, 0.14, 0.14, [0.55, 0.88, 1], 1, vp); }
+  }
+  const bd = G.buddy;
+  if (bd) { // little robot rat drone: grey body, pink ears, tail, cyan eye, spinning rotor
+    const yaw = bd.a + Math.PI;
+    const b = (lx, ly, lz, sx, sy, sz, c, em) => drawBoxR(bd.x, bd.y, bd.z, yaw, lx, ly, lz, sx, sy, sz, c, em, vp);
+    b(-0.18, -0.1, -0.26, 0.36, 0.22, 0.5, [0.72, 0.75, 0.82], 0.1);
+    b(-0.12, -0.04, -0.36, 0.24, 0.16, 0.12, [0.8, 0.82, 0.88], 0.1);
+    b(-0.2, 0.1, -0.2, 0.1, 0.12, 0.04, [1, 0.62, 0.72], 0.3); b(0.1, 0.1, -0.2, 0.1, 0.12, 0.04, [1, 0.62, 0.72], 0.3);
+    b(-0.09, 0.0, -0.38, 0.06, 0.05, 0.02, [0.1, 0.95, 1], 1); b(0.03, 0.0, -0.38, 0.06, 0.05, 0.02, [0.1, 0.95, 1], 1);
+    b(-0.03, -0.06, 0.24, 0.06, 0.05, 0.36, [1, 0.68, 0.74]);
+    const ra = G.time * 30; drawBoxR(bd.x, bd.y + 0.16, bd.z, ra, -0.32, 0, -0.03, 0.64, 0.03, 0.06, [0.3, 0.3, 0.36], 0, vp);
+  }
+}
+// HUD: gadget chip + camera button
+let ratHudSig = "";
+function ratHud(force) {
+  const chip = document.getElementById("gad-chip"), gb = document.getElementById("btn-gadget");
+  const own = ratOwned() && G.mode === "play";
+  if (chip) chip.classList.toggle("hidden", !own);
+  if (gb) gb.classList.toggle("hidden", !own);
+  if (!own || !chip || !G.gcd) return;
+  const i = G.gad | 0, GD = GADGETS[i], cd = G.gcd[i], sig = i + ":" + Math.ceil(cd) + ":" + (G.shieldT > 0) + ":" + !!G.buddy;
+  if (!force && sig === ratHudSig) return;
+  ratHudSig = sig;
+  chip.innerHTML = "<b>" + GD.icon + "</b><span>" + GD.name + "<i>" + (cd > 0 ? "RECHARGING " + Math.ceil(cd) + "s" : isTouchPlay() ? "READY · tap to switch" : "READY · F use · T switch") + "</i></span><u style='width:" + Math.round((1 - cd / GD.cd) * 100) + "%'></u>";
+  chip.classList.toggle("ready", cd <= 0);
+  if (gb) { gb.innerHTML = GD.icon + "<br>" + (cd > 0 ? Math.ceil(cd) + "s" : "GADGET"); gb.classList.toggle("cool", cd > 0); }
+}
+function ratToggleCam() {
+  STORE.cam3 = !STORE.cam3; saveStore(STORE);
+  if (G.mode === "play") toast(STORE.cam3 ? "🎥 3RD-PERSON CAMERA" : "🎥 1ST-PERSON CAMERA", "#1ce0ff");
+  ratTitle();
+}
+// title-screen options (free) + the pack panel (owned / locked teaser)
+function ratTitle() {
+  const co = document.getElementById("cam-opt"), ao = document.getElementById("assist-opt");
+  if (co) { co.textContent = "🎥 CAMERA: " + (STORE.cam3 ? "3RD PERSON" : "1ST PERSON"); co.classList.toggle("on", !!STORE.cam3); }
+  if (ao) { ao.textContent = "🛟 ASSIST MODE: " + (STORE.assist ? "ON" : "OFF"); ao.classList.toggle("on", !!STORE.assist); }
+  const cb = document.getElementById("cam-btn"); if (cb) cb.textContent = STORE.cam3 ? "3RD" : "1ST";
+  const od = document.getElementById("opt-desc");
+  if (od) od.textContent = STORE.assist ? "Assist Mode: 150 health, 40% less damage, faster healing, extra ammo, stronger aim assist and no fall damage." : "Free for everyone. Assist Mode makes it easier: more health, stronger aim assist and more.";
+  const el = document.getElementById("rat-panel");
+  if (!el) return;
+  const own = ratOwned(), viaHost = own && !ratOwnLocal();
+  const plaque = "<div class='rat-plaque'><span title='Luna'>🐀<em>LUNA</em></span><span title='Pi-rat'>🐀<em>PI-RAT 👁️</em></span><span title='Snowie'>🐀<em>SNOWIE</em></span></div>";
+  const skins = SKINS.map((s, i) => "<button type='button' data-sk='" + s.id + "' class='" + (i === ratSkinIdx() ? "on" : "") + (!s.free && !own ? " locked" : "") + "'>" + (!s.free && !own ? "🔒 " : "") + s.name + "</button>").join("");
+  if (own) {
+    el.className = "rat-panel owned";
+    el.innerHTML = "<div class='rat-head'>🐀 RATITA INDUSTRIES ITEM PACK <b>" + (viaHost ? "SHARED BY HOST" : "OWNED ✓") + "</b></div>" + plaque +
+      "<p>3 new weapons: <b>CHEESE CANNON</b> (6), <b>SQUEAK ZAPPER</b> (7), <b>SNOWIE SPRAYER</b> (8). 3 gadgets: <b>ROBO-RAT BUDDY</b>, <b>BUBBLE SHIELD</b>, <b>JET TAIL</b> (" + (isTouchPlay() ? "GADGET button, tap the chip to switch" : "F use, T switch") + ").</p>" +
+      "<div class='skin-row'>" + skins + "</div>";
+  } else {
+    el.className = "rat-panel locked";
+    el.innerHTML = "<div class='rat-head'>🔒 RATITA INDUSTRIES ITEM PACK <b>MINI PACK DLC</b></div>" + plaque +
+      "<p>High-tech gear from Luna, Pi-rat and Snowie's lab: the <b>Cheese Cannon</b>, the chain-lightning <b>Squeak Zapper</b>, the freezing <b>Snowie Sprayer</b>, gadgets (<b>Robo-Rat Buddy</b> drone, <b>Bubble Shield</b>, <b>Jet Tail</b>) and 5 rat skins you can see in 3rd person.</p>" +
+      "<div class='skin-row'>" + skins + "</div>" +
+      "<a class='btn rat-buy' href='" + ARCADE_URL + "' target='_top'>UNLOCK IN THE GROK ARCADE DLC SHOP →</a>";
+  }
+}
+function ratRefresh() {
+  const own = ratOwned();
+  if (ratWas === null) { ratWas = own; return; }
+  if (own === ratWas) return;
+  ratWas = own;
+  if (NET.on && NET.host) netBroadcast({ t: "rat", on: ratOwnLocal() ? 1 : 0 });
+  if (own) {
+    toast("🐀 RATITA INDUSTRIES ITEM PACK UNLOCKED! NEW WEAPONS, GADGETS + SKINS", "#ffd23f"); sfx("win");
+    if (G.mode === "play") { for (const i of [5, 6, 7]) G.got[i] = true; G.cheese = Math.max(G.cheese | 0, 8); G.zap = Math.max(G.zap | 0, 24); G.snow = Math.max(G.snow | 0, 60); if (!G.gcd) { G.gcd = [0, 0, 0]; G.gad = 0; } }
+  } else if (G.weapon >= 5) G.weapon = 0;
+  updateHUD(); ratHud(true); ratTitle();
+}
+(function bindRat() {
+  const $ = (id) => document.getElementById(id);
+  const tap = (el, fn) => { if (!el) return; el.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); fn(); }); el.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); }); };
+  if ($("cam-opt")) $("cam-opt").addEventListener("click", (e) => { e.preventDefault(); ratToggleCam(); });
+  if ($("assist-opt")) $("assist-opt").addEventListener("click", (e) => { e.preventDefault(); STORE.assist = !STORE.assist; saveStore(STORE); ratTitle(); });
+  if ($("rat-panel")) $("rat-panel").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-sk]"); if (!b) return;
+    e.preventDefault();
+    const S = SKINS.find(s => s.id === b.dataset.sk);
+    if (!S.free && !ratOwned()) { toast("🔒 " + S.name + " COMES WITH THE RATITA INDUSTRIES ITEM PACK", "#ffd23f"); return; }
+    STORE.skin = S.id; saveStore(STORE); ratTitle();
+  });
+  tap($("cam-btn"), ratToggleCam);
+  tap($("btn-gadget"), ratGadget);
+  tap($("gad-chip"), ratCycleGadget);
+  window.addEventListener("keydown", (e) => {
+    if (e.code === "KeyV") ratToggleCam();
+    if (e.code === "KeyF" && G.mode === "play") ratGadget();
+    if (e.code === "KeyT" && G.mode === "play") ratCycleGadget();
+  });
+  setInterval(ratRefresh, 1000);
+  window.addEventListener("storage", (e) => { if (!e.key || e.key === RAT_KEY || e.key === "grokDLC.owned") ratRefresh(); });
+  ratRefresh(); ratTitle();
+})();
+
 function refreshTitle() {
   document.querySelectorAll("#diff-row button").forEach(b => b.classList.toggle("on", +b.dataset.d === G.diff));
   document.getElementById("diff-desc").textContent = DIFFS[G.diff].desc;
@@ -2928,6 +3309,7 @@ function refreshTitle() {
   }
   const parts = DIFFS.map(d => STORE.best[d.name] ? d.name + " " + STORE.best[d.name] : "").filter(Boolean);
   document.getElementById("title-best").textContent = parts.length ? "BEST · " + parts.join(" · ") : "";
+  ratTitle();
 }
 document.querySelectorAll("#diff-row button").forEach(b => b.addEventListener("click", e => {
   e.preventDefault(); G.diff = +b.dataset.d; STORE.diff = G.diff; saveStore(STORE); refreshTitle();
@@ -3095,7 +3477,7 @@ function netDownTick(dt) {
   if (P.y < -4) respawnAtCheckpoint();
   NET.downT += NET.rdt || dt; // real seconds, even if the frame rate dips
   if (NET.downT > DOWN_AUTO) { // nobody came: back to the checkpoint on your own
-    netStandUp(MAX_HP);
+    netStandUp(maxHp());
     respawnAtCheckpoint();
     toast("BACK AT THE CHECKPOINT", "#7dff5a");
   }
@@ -3105,7 +3487,7 @@ function netStandUp(hp) {
   updateHUD(); hpShown = -1; updateHpBar();
 }
 function netWipe() {
-  netStandUp(MAX_HP);
+  netStandUp(maxHp());
   G.invuln = 2.2;
   if (G.ammo + G.reserve < MAG) G.reserve = MAG - G.ammo;
   respawnAtCheckpoint();
@@ -3236,6 +3618,7 @@ function netDraw(vp) {
       continue;
     }
     const walk = Math.hypot(L.vx || 0, L.vz || 0) > 0.5 ? Math.sin(G.time * 12) * 0.12 : 0;
+    if (L.sk > 0 && SKINS[L.sk]) { drawAvatar(x, y, z, R.yaw, SKINS[L.sk], walk, vp); continue; } // Ratita skin
     drawCube(x - 0.24, y, z - 0.1 + walk, 0.2, 0.7, 0.2, dark, 0, vp);
     drawCube(x + 0.04, y, z - 0.1 - walk, 0.2, 0.7, 0.2, dark, 0, vp);
     drawCube(x - 0.3, y + 0.7, z - 0.2, 0.6, 0.62, 0.4, c, 0.18, vp);
@@ -3264,7 +3647,7 @@ function netMinimap(ctx, px) {
 function netSendState() {
   if (!room || G.mode === "title") return;
   room.broadcast({ t: "p", g: NET.gen, x: nr2(P.x), y: nr2(P.y), z: nr2(P.z), yw: nr2(P.yaw), vx: nr2(P.vx), vz: nr2(P.vz),
-    hp: Math.round(G.hp), dn: NET.down ? 1 : 0, pad: NET.onPad ? 1 : 0, sc: G.score, k: G.kills, ds: NET.downs,
+    hp: Math.round(G.hp / maxHp() * 100), sk: ratSkinIdx(), dn: NET.down ? 1 : 0, pad: NET.onPad ? 1 : 0, sc: G.score, k: G.kills, ds: NET.downs,
     rv: NET.revT > 0 ? NET.revTo : 0, rp: Math.round(NET.revT / REVIVE_TIME * 100) });
 }
 function netSendWorld() {
@@ -3438,7 +3821,7 @@ function netGoSolo() { // host left: keep going alone with normal single-player 
   for (const p of pickups) p.pending = 0;
   if (G.mode === "play") {
     G.lives = MAX_LIVES;
-    if (NET.down) { NET.down = false; G.hp = MAX_HP; P.eye = 1.55; }
+    if (NET.down) { NET.down = false; G.hp = maxHp(); P.eye = 1.55; }
     NET.down = false;
     $id("overlay").classList.remove("show");
     updateHUD();
@@ -3451,11 +3834,13 @@ function netMsg(d, from) {
   if (!d || typeof d !== "object" || !NET.on) return;
   const t = d.t;
   if (t === "p") { netOnPlayer(d, from); return; }
+  if (t === "rat") { if (!NET.host) { NET.hostRat = !!d.on; ratRefresh(); } return; } // host shares the Ratita pack
   if (t === "s") {
     if (from !== NET.pid && d.g === NET.gen) {
       const R = netRemote(from), near = Math.hypot(d.o[0] - P.x, d.o[2] - P.z) < 25;
       if (d.w === 2) { addBeam(d.o, d.h, [1, 0.3, 0.8], 0.14, 0.08); if (near) blip(1400, 0.08, "sawtooth", 0.025, 300); }
       else if (d.w === 4) addBeam(d.o, d.h, [0.65, 0.95, 1], 0.22, 0.1);
+      else if (d.w >= 5) ratRemoteShot(d, near);
       else { NET.tracers.push({ o: d.o, h: d.h, t: 0.09, c: R.rgb }); if (near) blip(260, 0.05, "square", 0.025, 110); }
     }
     return;
@@ -3469,7 +3854,8 @@ function netMsg(d, from) {
     if (t === "take") { const p = netPickup(d.id); if (p && p.alive) { p.alive = false; netBroadcast({ t: "took", id: p.id, by: from }); } return; }
   }
   switch (t) {
-    case "rk": if (from !== NET.pid) rockets.push({ x: d.o[0], y: d.o[1], z: d.o[2], vx: d.v[0], vy: d.v[1], vz: d.v[2], life: 2.5, mine: false }); break;
+    case "rk": if (from !== NET.pid) rockets.push({ x: d.o[0], y: d.o[1], z: d.o[2], vx: d.v[0], vy: d.v[1], vz: d.v[2], life: 2.5, mine: false, cheese: !!d.ch }); break;
+    case "chz": if (from !== NET.pid) ratCheeseFx(d.p); break;
     case "boom": if (from !== NET.pid) applyBoom(d.p[0], d.p[1], d.p[2]); break;
     case "wave": if (!NET.host) spawnWave(d.p[0], d.p[1], d.p[2], false); break;
     case "toast": if (!NET.host) toast(d.m, d.c); break;
@@ -3523,6 +3909,7 @@ function netBoot() {
     room.on("open", () => {
       GN.ui.hide();
       if (!netBadge) netBadge = GN.ui.badge(room, { pos: "bc", label: room.code });
+      if (NET.host) netBroadcast({ t: "rat", on: ratOwnLocal() ? 1 : 0 });
       if (NET.host) {
         if (G.mode !== "play") { room.setMeta({ game: "voxels", playing: false, gen: NET.gen }); showOverlay("title"); refreshTitle(); }
       } else {
@@ -3541,6 +3928,7 @@ function netBoot() {
     });
     room.on("join", (p) => {
       if (p.pid === NET.pid) return;
+      if (NET.host) room.sendTo(p.pid, { t: "rat", on: ratOwnLocal() ? 1 : 0 });
       netNotice("<b>" + netEsc(p.name) + "</b> joined the game!", 3.5);
       if (NET.host && G.mode !== "title") {
         room.sendTo(p.pid, { t: "start", seed: NET.seed, diff: G.diff, n: NET.n, g: NET.gen });
@@ -3655,6 +4043,9 @@ window.__vox = {
   tpXZ(x, z) { const r = rooms.find(q => z >= q.z && z < q.z + q.d) || rooms[0]; P.x = x; P.z = z; P.y = groundY(x | 0, z | 0, r) + 1.01; P.vx = P.vy = P.vz = 0; },
   // co-op test hooks
   net: () => netDebug(), P, G, get enemyList() { return enemies; }, get pickupList() { return pickups; }, get roomList() { return rooms; }, get extractPad() { return extract; },
+  rat: { get owned() { return ratOwned(); }, get local() { return ratOwnLocal(); }, get skin() { return ratSkinIdx(); }, get cam3() { return cam3On(); }, get CAM3() { return CAM3; },
+    get buddy() { return G.buddy; }, get shieldT() { return G.shieldT; }, get gad() { return G.gad; }, gadget: () => ratGadget(), cycle: () => ratCycleGadget(), toggleCam: () => ratToggleCam(),
+    setAssist(on) { STORE.assist = !!on; saveStore(STORE); ratTitle(); }, setSkin(id) { STORE.skin = id; saveStore(STORE); ratTitle(); }, refresh: () => ratRefresh(), maxHp: () => maxHp(), aim: () => aimFwd(), fwd: () => forward() },
   hurt(n) { const g = G.invuln; G.invuln = 0; hurtPlayer(n / DIFFS[G.diff].dmg); G.invuln = g; },
 };
 
