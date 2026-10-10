@@ -3085,7 +3085,7 @@ function ratShoot(w, o, d0) {
     const d = assistDir(o, d0), s = 0.025;
     const pd = { x: d.x + (Math.random() - 0.5) * s, y: d.y + (Math.random() - 0.5) * s, z: d.z + (Math.random() - 0.5) * s };
     const L = Math.hypot(pd.x, pd.y, pd.z); pd.x /= L; pd.y /= L; pd.z /= L;
-    const hitE = fireRay(o, pd, 0.6);
+    const hitE = fireRay(o, pd, 0.35);
     if (hitE) { if (NET.on && !NET.host) { netSend({ t: "frz", id: hitE.id }); hitE.frost = (hitE.frost || 0) + 1; } else applyFrost(hitE); }
     ratSnowFx(gunTip(o), pd);
     if (NET.on && (G.snowNet = (G.snowNet || 0) + 1) % 2 === 0) netShot(o, 7);
@@ -3140,17 +3140,17 @@ function ratRefill(k) { if (!ratOwned()) return; G.cheese = Math.min(WEAP[5].max
 // ---------- gadgets ----------
 function ratGadget() {
   if (G.mode !== "play" || NET.down) return;
-  if (!ratOwned()) { toast("🔒 GADGETS COME WITH THE RATITA INDUSTRIES ITEM PACK", "#ffd23f"); return; }
+  if (!ratOwned()) { toast("🔒 RATITA DLC GADGET", "#ffd23f"); return; }
   const i = G.gad | 0, GD = GADGETS[i];
-  if (G.gcd[i] > 0) { toast(GD.name + " RECHARGING · " + Math.ceil(G.gcd[i]) + "s", "#9fc3dc"); return; }
+  if (G.gcd[i] > 0) { toast("RECHARGING " + Math.ceil(G.gcd[i]) + "s", "#9fc3dc"); return; }
   G.gcd[i] = GD.cd;
   const f = forward();
-  if (GD.id === "buddy") { G.buddy = { t: 15, x: P.x, y: P.y + 2, z: P.z, cd: 0.5, a: 0 }; toast("🐀 ROBO-RAT BUDDY DEPLOYED! SQUEAK!", "#9fe8ff"); blip(1200, 0.08, "square", 0.05, 1800); }
+  if (GD.id === "buddy") { G.buddy = { t: 15, x: P.x, y: P.y + 2, z: P.z, cd: 0.5, a: 0 }; toast("🐀 ROBO-RAT BUDDY, GO!", "#9fe8ff"); blip(1200, 0.08, "square", 0.05, 1800); }
   else if (GD.id === "shield") { G.shieldT = 5; toast("🫧 BUBBLE SHIELD UP!", "#7fd8ff"); blip(500, 0.3, "sine", 0.07, 900); }
   else { const fl = Math.hypot(f.x, f.z) || 1; P.vy = 12; P.vx += f.x / fl * 8; P.vz += f.z / fl * 8; P.grounded = false; sfx("jump"); for (let k = 0; k < 14; k++) parts.push({ x: P.x, y: P.y + 0.4, z: P.z, vx: (Math.random() - 0.5) * 3, vy: -4 - Math.random() * 3, vz: (Math.random() - 0.5) * 3, life: 0.5, col: Math.random() < 0.5 ? [1, 0.6, 0.1] : [1, 0.9, 0.3], s: 0.16 }); }
   ratHud(true);
 }
-function ratCycleGadget() { if (!ratOwned()) { ratGadget(); return; } G.gad = ((G.gad | 0) + 1) % GADGETS.length; toast(GADGETS[G.gad].icon + " " + GADGETS[G.gad].name + ": " + GADGETS[G.gad].desc, "#ffd23f"); ratHud(true); }
+function ratCycleGadget() { if (!ratOwned()) { ratGadget(); return; } G.gad = ((G.gad | 0) + 1) % GADGETS.length; toast(GADGETS[G.gad].icon + " " + GADGETS[G.gad].name, "#ffd23f"); ratHud(true); }
 function ratShieldPing() { G.hurtFlash = 0; blip(1400, 0.06, "sine", 0.04, 800); burst(P.x, P.y + 1, P.z, [0.5, 0.85, 1], 4, 3); }
 function ratUpdate(dt) {
   if (!G.gcd) return;
@@ -3178,7 +3178,7 @@ function ratUpdate(dt) {
         if (NET.on) netEvent({ t: "s", o: [nr2(bd.x), nr2(bd.y), nr2(bd.z)], h: h.map(nr2), w: 6 });
       }
     }
-    if (bd.t <= 0) { G.buddy = null; toast("ROBO-RAT BUDDY WENT HOME FOR CHEESE", "#9fc3dc"); }
+    if (bd.t <= 0) { G.buddy = null; toast("BUDDY WENT HOME 🧀", "#9fc3dc"); }
   }
   document.body.classList.toggle("shield-on", G.shieldT > 0);
   ratHud(false);
@@ -3259,7 +3259,7 @@ function ratRefresh() {
   ratWas = own;
   if (NET.on && NET.host) netBroadcast({ t: "rat", on: ratOwnLocal() ? 1 : 0 });
   if (own) {
-    toast("🐀 RATITA INDUSTRIES ITEM PACK UNLOCKED! NEW WEAPONS, GADGETS + SKINS", "#ffd23f"); sfx("win");
+    toast("🐀 RATITA PACK UNLOCKED!", "#ffd23f"); sfx("win");
     if (G.mode === "play") { for (const i of [5, 6, 7]) G.got[i] = true; G.cheese = Math.max(G.cheese | 0, 8); G.zap = Math.max(G.zap | 0, 24); G.snow = Math.max(G.snow | 0, 60); if (!G.gcd) { G.gcd = [0, 0, 0]; G.gad = 0; } }
   } else if (G.weapon >= 5) G.weapon = 0;
   updateHUD(); ratHud(true); ratTitle();
@@ -3273,7 +3273,7 @@ function ratRefresh() {
     const b = e.target.closest("button[data-sk]"); if (!b) return;
     e.preventDefault();
     const S = SKINS.find(s => s.id === b.dataset.sk);
-    if (!S.free && !ratOwned()) { toast("🔒 " + S.name + " COMES WITH THE RATITA INDUSTRIES ITEM PACK", "#ffd23f"); return; }
+    if (!S.free && !ratOwned()) { toast("🔒 RATITA DLC SKIN", "#ffd23f"); return; }
     STORE.skin = S.id; saveStore(STORE); ratTitle();
   });
   tap($("cam-btn"), ratToggleCam);
