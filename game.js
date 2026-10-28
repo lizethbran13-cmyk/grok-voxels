@@ -2857,6 +2857,11 @@ document.addEventListener("pointerlockchange", () => {
   joyZone.addEventListener("lostpointercapture", e => {
     if (e.pointerId === touch.joyPtr) endJoy();
   });
+  window.addEventListener("pointerup", joyUp, true);
+  window.addEventListener("pointercancel", joyUp, true);
+  window.addEventListener("touchend", e => { if (touch.joyPtr != null && (!e.touches || e.touches.length === 0)) endJoy(); }, { passive: true });
+  window.addEventListener("touchcancel", () => endJoy(), { passive: true });
+  window.addEventListener("blur", () => { endJoy(); touch.lookPtr = null; });
 
   lookZone.addEventListener("pointerdown", e => {
     if (G.mode !== "play") return;
@@ -3276,11 +3281,24 @@ function ratRefresh() {
     if (!S.free && !ratOwned()) { toast("🔒 RATITA DLC SKIN", "#ffd23f"); return; }
     STORE.skin = S.id; saveStore(STORE); ratTitle();
   });
+  function manualRespawn() {
+    resetTouch();
+    for (const k in keys) keys[k] = false;
+    shooting = false;
+    if (G.mode !== "play") return;
+    if (!(NET.on && netRespawnNearPartner())) respawnAtCheckpoint();
+    G.invuln = Math.max(G.invuln || 0, 1.6);
+    sfx("jump");
+    toast("↻ RESPAWNED · JOYSTICK RESET", "#ffd23f");
+  }
+  window.manualRespawn = manualRespawn;
   tap($("cam-btn"), ratToggleCam);
+  tap($("respawn-btn"), manualRespawn);
   tap($("btn-gadget"), ratGadget);
   tap($("gad-chip"), ratCycleGadget);
   window.addEventListener("keydown", (e) => {
     if (e.code === "KeyV") ratToggleCam();
+    if (e.code === "KeyK" && G.mode === "play") { const rb = document.getElementById("respawn-btn"); if (rb && window.manualRespawn) window.manualRespawn(); }
     if (e.code === "KeyF" && G.mode === "play") ratGadget();
     if (e.code === "KeyT" && G.mode === "play") ratCycleGadget();
   });

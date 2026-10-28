@@ -483,6 +483,9 @@ body.touch #wbar button b { display: none; }
 #cam-btn { position: fixed; z-index: 10; display: none; top: calc(190px + env(safe-area-inset-top, 0px)); right: calc(16px + env(safe-area-inset-right, 0px));
   font: inherit; font-weight: 900; font-size: 11px; letter-spacing: 1px; width: 52px; height: 34px; color: #06101c; background: #1ce0ff; border: none; box-shadow: 3px 3px 0 #041018; cursor: pointer; touch-action: none; }
 body:not(.menu) #cam-btn { display: block; }
+#respawn-btn { position: fixed; z-index: 12; display: none; top: calc(190px + env(safe-area-inset-top, 0px)); right: calc(74px + env(safe-area-inset-right, 0px)); font: inherit; font-weight: 900; font-size: 11px; letter-spacing: 1px; padding: 0 10px; height: 34px; color: #06101c; background: #ffd23f; border: 2px solid #fff56a; box-shadow: 3px 3px 0 #041018; cursor: pointer; touch-action: manipulation; }
+#respawn-btn:active { transform: translate(1px, 1px); background: #fff56a; }
+body:not(.menu) #respawn-btn { display: block; }
 #gad-chip { position: fixed; z-index: 10; left: calc(16px + env(safe-area-inset-left, 0px)); top: calc(84px + env(safe-area-inset-top, 0px));
   display: flex; align-items: center; gap: 6px; padding: 5px 9px 7px; background: rgba(42,22,64,0.85); border: 2px solid #ffd23f; color: #ffd23f; font-size: 10px; font-weight: 800;
   letter-spacing: 1px; cursor: pointer; touch-action: none; overflow: hidden; -webkit-user-select: none; user-select: none; }
@@ -501,6 +504,7 @@ body.shield-on:not(.menu) #shield-fx { display: block; }
 @media (max-width: 700px), (max-height: 500px) {
   #wbar button { min-width: 44px; padding: 3px 5px 2px; font-size: 9px; }
   #cam-btn { top: calc(16px + env(safe-area-inset-top, 0px) + 140px); right: calc(12px + env(safe-area-inset-right, 0px)); width: 46px; height: 30px; }
+  #respawn-btn { top: calc(16px + env(safe-area-inset-top, 0px) + 140px); right: calc(64px + env(safe-area-inset-right, 0px)); height: 30px; font-size: 10px; padding: 0 8px; }
 }
 body.touch #gad-chip { top: auto; bottom: calc(212px + env(safe-area-inset-bottom, 0px)); }
 @media (max-height: 500px) { body.touch #gad-chip { bottom: auto; top: calc(96px + env(safe-area-inset-top, 0px)); } }
