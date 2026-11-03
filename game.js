@@ -2959,7 +2959,7 @@ function ratOwned() { return ratOwnLocal() || (NET.on && !NET.host && !!NET.host
 const SKINS = [
   { id: "classic", name: "CLASSIC", free: true },
   { id: "luna", name: "LUNA LAB COAT", body: [0.96, 0.96, 1.0], trim: [0.62, 0.36, 1.0], pants: [0.42, 0.24, 0.72], head: [0.66, 0.64, 0.72], visor: [0.75, 0.5, 1.0], ear: [0.66, 0.64, 0.72], tail: true, extra: "goggles" },
-  { id: "pirat", name: "PI-RAT CAPTAIN", body: [0.14, 0.13, 0.17], trim: [0.95, 0.15, 0.2], pants: [0.3, 0.2, 0.14], head: [0.55, 0.47, 0.42], visor: [1.0, 0.85, 0.2], ear: [0.55, 0.47, 0.42], tail: true, extra: "pirate" },
+  { id: "pirat", name: "PI-RAT CAPTAIN", body: [0.14, 0.13, 0.17], trim: [0.95, 0.15, 0.2], pants: [0.3, 0.2, 0.14], head: [0.42, 0.37, 0.32], visor: [1.0, 0.85, 0.2], ear: [0.95, 0.72, 0.76], tail: true, extra: "pirate" },
   { id: "snowie", name: "SNOWIE FROST SUIT", body: [0.62, 0.88, 1.0], trim: [1.0, 1.0, 1.0], pants: [0.35, 0.6, 0.9], head: [0.98, 0.98, 1.0], visor: [0.4, 0.95, 1.0], ear: [0.98, 0.98, 1.0], tail: true, extra: "scarf" },
   { id: "ceo", name: "RATITA CEO", body: [0.2, 0.18, 0.3], trim: [1.0, 0.82, 0.2], pants: [0.16, 0.15, 0.22], head: [0.72, 0.7, 0.74], visor: [1.0, 0.82, 0.2], ear: [0.72, 0.7, 0.74], tail: true, extra: "tophat" },
   { id: "robo", name: "ROBO-RAT MK1", body: [0.75, 0.78, 0.85], trim: [0.1, 0.95, 1.0], pants: [0.35, 0.38, 0.45], head: [0.82, 0.85, 0.9], visor: [0.1, 0.95, 1.0], ear: [0.6, 0.63, 0.7], tail: true, extra: "antenna", glow: true },
